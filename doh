@@ -5,10 +5,13 @@ DOH_VERSION="0.1"
 # Setup output logging
 DOH_LOGFILE=/tmp/doh.log
 DOH_LOGLEVEL="info"
+
+doh_setup_logging() {
 >${DOH_LOGFILE}
 exec > >(tee -a "${DOH_LOGFILE}")
 exec 2> >(tee -a "${DOH_LOGFILE}" >&2)
 exec 5<>${DOH_LOGFILE}
+}
 
 #
 # Internal: Logging methods
@@ -283,6 +286,8 @@ Available commands
   install    install and setup a new odoo instance
   create-db  create a new database using current profile
   drop-db    drop an existing database
+  start      start odoo service
+  stop       stop odoo service
   help       show this help message
 
 Use "odoo-helper help CMD" for detail about a specific command
@@ -451,12 +456,45 @@ HELP_CMD_DROP_DB
     erunquiet dropdb "${DB}" || die "Unable to drop database ${DB}"
 }
 
+cmd_start() {
+: <<HELP_CMD_START
+doh start [-f]
+
+options:
+
+ -f   start server in foreground
+HELP_CMD_START
+
+    if [ x"$1" = x"-f" ]; then
+        run_in_foreground="1"
+	shift
+    fi
+
+    doh_profile_load
+    if [ x"${run_in_foreground}" != x"" ]; then
+        doh_run_server "$@"
+    else
+        doh_svc_start
+    fi
+}
+
+cmd_stop() {
+: <<HELP_CMD_STOP
+doh start [-f]
+
+HELP_CMD_STOP
+    doh_profile_load
+    doh_svc_stop
+}
+
+
 CMD="$1"; shift;
 case $CMD in
     self-upgrade)
         # TOOD: add self-upgrading function
         ;;
     *)
+        doh_setup_logging
         if [ x"$CMD" != x"" ]; then
             CMD_FUNC="cmd_${CMD//-/_}"
             CMD_TYPE=$(type -t "$CMD_FUNC")
