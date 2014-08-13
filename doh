@@ -7,10 +7,15 @@ DOH_LOGFILE=/tmp/doh.log
 DOH_LOGLEVEL="info"
 
 doh_setup_logging() {
+
+exec 6>&1
+exec 7>&2
+
 >${DOH_LOGFILE}
 exec > >(tee -a "${DOH_LOGFILE}")
 exec 2> >(tee -a "${DOH_LOGFILE}" >&2)
 exec 5<>${DOH_LOGFILE}
+
 }
 
 #
@@ -231,6 +236,48 @@ doh_profile_load() {
     done
 }
 
+doh_patch_main() {
+    if [ x"${PROFILE_PATCHSET}" != x"" ]; then
+        elog "fetching odoo patch"
+        local patchset_tmp=`mktemp`
+        erunquiet wget -q -O "${patchset_tmp}" "${PROFILE_PATCHSET}"
+        elog "apply odoo patch locally"
+        erunquiet git -C "${DIR_MAIN}" apply "${patchset_tmp}"
+        eremove "${patchset_tmp}"
+    fi
+}
+
+doh_install_extra() {
+    if [ x"${EXTRA_URL}" != x"" ]; then
+        elog "fetching odoo extra modules"
+        local extra_tmp=`mktemp`
+        local extra_tmpdir=`mktemp -d`
+        erunquiet wget -q -O "${extra_tmp}" "${EXTRA_URL}"
+        elog "extracting odoo extra modules"
+        erunquiet 7z x -y "-o${extra_tmpdir}" "${extra_tmp}"
+        rm -Rf extra
+        mkdir extra
+        local module_parent_dirs=""
+        for module_path in $(find "${extra_tmpdir}" -name __openerp__.py -exec dirname {} \;); do
+            module_parent_path=$(dirname "${module_path}")
+            module_parent_dirs="${module_parent_dir}\n${module_parent_path}"
+            local module_name=$(basename "${module_path}")
+            elog "extracting module -- ${module_name}"
+            mv "${module_path}" "${DIR_EXTRA}"
+        done
+        module_parent_dir_unique=$(echo -e "${module_parent_dirs}" | sed '/^$/d' | sort -u | wc -l)
+        if [ $module_parent_dir_unique -eq 1 ]; then
+            module_parent_dir=$(echo -e "${module_parent_dirs}" | sed '/^$/d' | sort -u)
+            if [ -d "${module_parent_dir}/.git" ]; then
+                elog "extracting extra git repository"
+                mv "${module_parent_dir}/.git" "${DIR_EXTRA}"
+            fi
+        fi
+        eremove "${extra_tmp}"
+        eremove "${extra_tmpdir}"
+    fi
+}
+
 doh_run_server() {
     "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
 }
@@ -284,8 +331,10 @@ Usage: doh CMD [OPTS...]
 
 Available commands
   install    install and setup a new odoo instance
+  upgrade    upgrade odoo and extra modules
   create-db  create a new database using current profile
   drop-db    drop an existing database
+  upgrade-db upgrade a specific database
   start      start odoo service
   stop       stop odoo service
   help       show this help message
@@ -373,32 +422,8 @@ HELP_CMD_INSTALL
     rm -Rf "${DIR_MAIN}"
     erun git clone "${PROFILE_REPO}" -b "${PROFILE_BRANCH}" --single-branch "${DIR_MAIN}"
 
-    if [ x"${PROFILE_PATCHSET}" != x"" ]; then
-        elog "fetching odoo patch"
-        local patchset_tmp=`mktemp`
-        erunquiet wget -q -O "${patchset_tmp}" "${PROFILE_PATCHSET}"
-        elog "apply odoo patch locally"
-        erunquiet git -C main apply "${patchset_tmp}"
-        eremove "${patchset_tmp}"
-    fi
-
-    if [ x"${EXTRA_URL}" != x"" ]; then
-        elog "fetching odoo extra modules"
-        local extra_tmp=`mktemp`
-        local extra_tmpdir=`mktemp -d`
-        erunquiet wget -q -O "${extra_tmp}" "${EXTRA_URL}"
-        elog "extracting odoo extra modules"
-        erunquiet 7z x -y "-o${extra_tmpdir}" "${extra_tmp}"
-        rm -Rf extra
-        mkdir extra
-        for module_path in $(find "${extra_tmpdir}" -name __openerp__.py -exec dirname {} \;); do
-            local module_name=$(basename "${module_path}")
-            elog "extracting module -- ${module_name}"
-            mv "${module_path}" "extra"
-        done
-        eremove "${extra_tmp}"
-        eremove "${extra_tmpdir}"
-    fi
+    doh_patch_main
+    doh_install_extra
 
     elog "installing odoo dependencies (sudo)"
     install_odoo_depends "${DIR_MAIN}"
@@ -416,6 +441,34 @@ HELP_CMD_INSTALL
     erun sudo service odoo-${PROFILE_NAME} start
 
     elog "installation sucessfull, you can now access odoo using http://localhost:8069/"
+}
+
+cmd_upgrade() {
+: <<HELP_CMD_UPGRADE
+doh upgrade [DATABASE ...]
+HELP_CMD_UPGRADE
+
+    doh_profile_load
+
+    if [ x"${PROFILE_URL}" != x"" ]; then
+        elog "updating odoo profile"
+        tmp_profile=`mktemp`
+        erunquiet wget -q -O "${tmp_profile}" "$PROFILE_URL" || die 'Unable to update odoo profile'
+        mv "${tmp_profile}" "${DIR_ROOT}/odoo.profile"
+    fi
+
+    elog "updating odoo source code"
+    erunquiet git -C "${DIR_MAIN}" checkout .
+    erunquiet git -C "${DIR_MAIN}" pull
+
+    doh_patch_main
+    doh_install_extra
+
+    if [ $# -gt 0 ]; then
+        for db in $@; do
+            cmd_upgrade_db "${db}"
+        done
+    fi
 }
 
 cmd_create_db() {
@@ -456,6 +509,23 @@ HELP_CMD_DROP_DB
     erunquiet dropdb "${DB}" || die "Unable to drop database ${DB}"
 }
 
+cmd_upgrade_db() {
+: <<HELP_CMD_UPGRADE_DB
+doh upgrade-db NAME
+
+HELP_CMD_UPGRADE_DB
+    if [ $# -lt 1 ]; then
+        echo "Usage: doh upgrade-db: missing argument -- NAME"
+        cmd_help "upgrade_db"
+    fi
+    DB="$1"
+
+    doh_profile_load
+    elog "upgrading ${DB}... (will take some time)"
+    erunquiet doh_run_server -d "${DB}" --stop-after-init -u all || die 'Unable to upgrade database'
+    elog "database ${DB} upgraded successfully"
+}
+
 cmd_start() {
 : <<HELP_CMD_START
 doh start [-f]
@@ -472,6 +542,8 @@ HELP_CMD_START
 
     doh_profile_load
     if [ x"${run_in_foreground}" != x"" ]; then
+        exec 1>&6 6>&-
+        exec 2>&7 7>&-
         doh_run_server "$@"
     else
         doh_svc_start
@@ -490,8 +562,15 @@ HELP_CMD_STOP
 
 CMD="$1"; shift;
 case $CMD in
-    self-upgrade)
+    internal-self-upgrade)
         # TOOD: add self-upgrading function
+        elog "Going to upgrade doh (path: $0) with remote version, press ENTER to continue or Ctrl-C to cancel"
+        read ok
+        tmp_doh=`mktemp`
+        wget -q -O "${tmp_doh}" "https://raw.githubusercontent.com/xavieralt/doh/master/doh" || die 'Unable to fetch remote doh'
+        (cat "${tmp_doh}" | sudo tee "$0" >/dev/null) || die 'Unable to update doh'
+        sudo chmod 755 "$0"  # ensure script is executable
+        exit 0
         ;;
     *)
         doh_setup_logging
