@@ -362,9 +362,9 @@ doh install [-d] [-a] [-p URL INSTALL_DIR]
 
 options:
 
- -d      install PostgreSQL database server
- -a      automated startup, start on system boot
- -p URL  load profile from a remote url
+ -d                  install PostgreSQL database server
+ -a                  automated startup, start on system boot
+ -p URL INSTALL_DIR  load profile from a remote url
 HELP_CMD_INSTALL
 
     local profdir=""
@@ -487,7 +487,7 @@ HELP_CMD_CREATE_DB
     elog "creating database ${DB}"
     erunquiet createdb -E unicode "${DB}" || die "Unable to create database ${DB}"
     elog "initializing database ${DB} for odoo"
-    erunquiet doh_run_server -d "${DB}" --stop-after-init -i "${DB_INIT_MODULES_ON_CREATE:-base}" ${DB_INIT_EXTRA_ARGS}
+    erunquiet doh_run_server -d "${DB}" --stop-after-init -i "${DB_INIT_MODULES_ON_CREATE:-base}" ${DB_INIT_EXTRA_ARGS} || die "Failed to initialize database ${DB}"
     elog "database ${DB} created successfully"
 }
 
