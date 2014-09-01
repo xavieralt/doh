@@ -610,9 +610,19 @@ HELP_CMD_DROP_DB
 
 cmd_upgrade_db() {
 : <<HELP_CMD_UPGRADE_DB
-doh upgrade-db NAME
+doh upgrade-db [-f] NAME
+
+options:
+
+ -f   start server in foreground
 
 HELP_CMD_UPGRADE_DB
+
+    if [ x"$1" = x"-f" ]; then
+        run_in_foreground="1"
+    shift
+    fi
+
     if [ $# -lt 1 ]; then
         echo "Usage: doh upgrade-db: missing argument -- NAME"
         cmd_help "upgrade_db"
@@ -621,7 +631,13 @@ HELP_CMD_UPGRADE_DB
 
     doh_profile_load
     elog "upgrading ${DB}... (will take some time)"
-    erunquiet doh_run_server -d "${DB}" --stop-after-init -u all || die 'Unable to upgrade database'
+    if [ x"${run_in_foreground}" != x"" ]; then
+        exec 1>&6 6>&-
+        exec 2>&7 7>&-
+        doh_run_server -d "${DB}" --stop-after-init -u all || die 'Unable to upgrade database'
+    else
+        erunquiet doh_run_server -d "${DB}" --stop-after-init -u all || die 'Unable to upgrade database'
+    fi
     elog "database ${DB} upgraded successfully"
 }
 
