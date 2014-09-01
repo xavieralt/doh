@@ -236,6 +236,22 @@ doh_profile_load() {
     done
 }
 
+doh_profile_update() {
+    if [ x"${PROFILE_URL}" != x"" ]; then
+        elog "updating odoo profile"
+        tmp_profile=`mktemp`
+        erunquiet wget -q -O "${tmp_profile}" "$PROFILE_URL" || die 'Unable to update odoo profile'
+        mv "${tmp_profile}" "${DIR_ROOT}/odoo.profile"
+    fi
+}
+
+doh_upgrade_main() {
+    elog "updating odoo source code"
+    erunquiet git -C "${DIR_MAIN}" checkout .
+    erunquiet git -C "${DIR_MAIN}" pull
+    doh_patch_main
+}
+
 doh_patch_main() {
     if [ x"${PROFILE_PATCHSET}" != x"" ]; then
         elog "fetching odoo patch"
@@ -449,19 +465,9 @@ doh upgrade [DATABASE ...]
 HELP_CMD_UPGRADE
 
     doh_profile_load
+    doh_profile_update
 
-    if [ x"${PROFILE_URL}" != x"" ]; then
-        elog "updating odoo profile"
-        tmp_profile=`mktemp`
-        erunquiet wget -q -O "${tmp_profile}" "$PROFILE_URL" || die 'Unable to update odoo profile'
-        mv "${tmp_profile}" "${DIR_ROOT}/odoo.profile"
-    fi
-
-    elog "updating odoo source code"
-    erunquiet git -C "${DIR_MAIN}" checkout .
-    erunquiet git -C "${DIR_MAIN}" pull
-
-    doh_patch_main
+    doh_upgrade_main
     doh_install_extra
 
     if [ $# -gt 0 ]; then
