@@ -295,7 +295,14 @@ doh_install_extra() {
 }
 
 doh_run_server() {
-    "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
+    local v="${PROFILE_VERSION:-8.0}"
+    if [ x"${v}" = x"8.0" ] || [ x"${v}" = "7.0" ]; then
+        "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
+    elif [ x"${v}" = "6.1" ] || [ x"${v}" = x"6.0" ]; then
+        "${DIR_MAIN}/bin/openerp-server.py" -c "${DIR_CONF}/odoo-server.conf" "$@"
+    else
+        die "No known way to start server for version ${v}"
+    fi
 }
 
 doh_svc_is_running() {
@@ -410,6 +417,8 @@ HELP_CMD_INSTALL
                 ;;
         esac
     done
+    shift $(($OPTIND - 1))
+
     if [ x"$profdir" != x"" ]; then
         if [ ! -d "$profdir" ]; then
             mkdir -p "$profdir"
