@@ -294,6 +294,23 @@ doh_install_extra() {
     fi
 }
 
+doh_sublime_project_template() {
+    PROJ_TMPL_FILE="${DIR_ROOT}/odoo.sublime-project"
+    cat >"${PROJ_TMPL_FILE}" <<EOF
+{
+    "folders":
+    [
+        {
+            "follow_symlinks": true,
+            "name": "${PROFILE_NAME}",
+            "path": "./"
+        }
+    ]
+}
+EOF
+  elog "created sublime-text project template in: ${PROJ_TMPL_FILE}"
+}
+
 doh_run_server() {
     local v="${PROFILE_VERSION:-8.0}"
     if [ x"${v}" = x"8.0" ] || [ x"${v}" = "7.0" ]; then
