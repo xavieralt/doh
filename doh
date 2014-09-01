@@ -379,6 +379,17 @@ HELP_CMD_HELP
     fi
 }
 
+cmd_internal() {
+    doh_profile_load
+
+    if [ $# -lt 1 ]; then
+	echo "usage: missing commands"
+    fi
+
+    CMD="doh_${1//-/_}"; shift;
+    $CMD $@
+}
+
 cmd_init() {
 : <<HELP_CMD_INIT
 doh init [-f] [DIR]
