@@ -379,6 +379,62 @@ HELP_CMD_HELP
     fi
 }
 
+cmd_init() {
+: <<HELP_CMD_INIT
+doh init [-f] [DIR]
+
+Create a new odoo.profile
+
+options:
+
+-f                  force creation if odoo.profile already exists
+HELP_CMD_INIT
+
+    local force="0"
+    OPTIND=1
+    while getopts ":f" opt; do
+        case $opt in
+            f)
+                force="1"
+                ;;
+        esac
+    done
+    shift $(($OPTIND - 1))
+
+    DIR="${1:-.}"
+    if [ ! -d "$DIR" ]; then
+        mkdir -p "$DIR"
+    fi
+
+    if [ -f "$DIR/odoo.profile" ] && [ x"${force}" != x"1" ]; then
+        die "Unable to create template odoo.profile, file exists. Use -f to override"
+    fi
+
+    cat <<TMPL_ODOO_PROFILE >${DIR}/odoo.profile
+[profile]
+name=PROFILE_NAME
+version=8.0
+repo=http://github.com/odoo/odoo
+branch=8.0
+patchset=
+autostart=1
+url=UPDATE_URL
+
+[extra]
+repo=
+url=
+
+[db]
+host=
+port=
+user=
+pass=
+init_modules_on_create=base
+init_extra_args=
+
+TMPL_ODOO_PROFILE
+}
+
 cmd_install() {
 : <<HELP_CMD_INSTALL
 doh install [-d] [-a] [-p URL INSTALL_DIR]
