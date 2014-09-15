@@ -167,13 +167,13 @@ doh_config_init() {
     elog "Generating Odoo init script"
     sed \
         -e "s#^DAEMON=.*\$#DAEMON=${DIR_MAIN}/openerp-server#" \
-        -e "s/^\\(NAME\\|DESC\\)=.*\$/\\1=${PROFILE_NAME}/" \
+        -e "s/^\\(NAME\\|DESC\\)=.*\$/\\1=${CONF_PROFILE_NAME}/" \
         -e "s#^CONFIG=.*\$#CONFIG=${ODOO_CONF_FILE}#" \
         -e "s#^LOGFILE=.*\$#LOGFILE=${ODOO_LOG_FILE}#" \
         -e "s/^USER=.*\$/USER=${RUNAS}/" \
         -e "s#--pidfile /var/run/#--pidfile ${DIR_RUN}/#" \
-        ${TMPL_INIT_FILE} | erunquiet sudo tee "/etc/init.d/odoo-${PROFILE_NAME}"
-    erunquiet sudo chmod 755 "/etc/init.d/odoo-${PROFILE_NAME}"
+        ${TMPL_INIT_FILE} | erunquiet sudo tee "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
+    erunquiet sudo chmod 755 "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
 
     elog "Generating Odoo config file"
     cat <<EOF | erunquiet tee "${ODOO_CONF_FILE}"
@@ -198,9 +198,9 @@ EOF
     erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
     erunquiet sudo chown "${RUNAS}:adm" "${ODOO_LOG_FILE}"
 
-    if [ x"${PROFILE_AUTOSTART}" = x"1" ]; then
-        elog "Adding Odoo '${PROFILE_NAME}' to autostart"
-        erunquiet sudo update-rc.d "odoo-${PROFILE_NAME}" defaults
+    if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
+        elog "Adding Odoo '${CONF_PROFILE_NAME}' to autostart"
+        erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
     fi
 }
 
@@ -235,14 +235,22 @@ doh_profile_load() {
     OLDIFS="${IFS}"
     SECTIONS=$(sed -n '/^\[\(.*\)\]/{s/\[//;s/\]//;p}' "${DIR_ROOT}/odoo.profile")
     for section in ${SECTIONS}; do
+        export CONF_${section^^}="1"  # mark section as present
         VARS=$(sed -n "/\[${section}]/,/^\[/{/^\[/d;/^$/d;/^#/d;p}" "${profile}")
         IFS=$'\n'; while read -r var; do
             var_name="${var%%=*}"
             var_value="${var#*=}"
-            export ${section^^}_${var_name^^}="${var_value}"
+            export CONF_${section^^}_${var_name^^}="${var_value}"
         done <<< "${VARS}"
         IFS="$OLDIFS"
     done
+
+    if [ x"${CONF_MAIN}" = x"" ]; then
+        # old profile version, move main specific part to main
+        export CONF_MAIN_BRANCH="${CONF_PROFILE_BRANCH}"
+        export CONF_MAIN_REPO="${CONF_PROFILE_REPO}"
+        export CONF_MAIN_PATCHSET="${CONF_PROFILE_PATCHSET}"
+    fi
 
     DOH_PROFILE_LOADED="1"
 }
@@ -261,10 +269,10 @@ doh_check_dirs() {
 
 doh_profile_update() {
     doh_profile_load
-    if [ x"${PROFILE_URL}" != x"" ]; then
+    if [ x"${CONF_PROFILE_URL}" != x"" ]; then
         elog "updating odoo profile"
         tmp_profile=`mktemp`
-        erunquiet wget -q -O "${tmp_profile}" "$PROFILE_URL" || die 'Unable to update odoo profile'
+        erunquiet wget -q -O "${tmp_profile}" "${CONF_PROFILE_URL}" || die 'Unable to update odoo profile'
         mv "${tmp_profile}" "${DIR_ROOT}/odoo.profile"
     fi
 }
@@ -273,7 +281,7 @@ doh_upgrade_main() {
     doh_profile_load
     if [ ! -d "${DIR_MAIN}/.git" ]; then
         elog "fetching odoo source code"
-        erun git clone "${PROFILE_REPO}" -b "${PROFILE_BRANCH}" --single-branch "${DIR_MAIN}"
+        erun git clone "${CONF_MAIN_REPO}" -b "${CONF_MAIN_BRANCH}" --single-branch "${DIR_MAIN}"
     else
         elog "updating odoo source code"
         erunquiet git -C "${DIR_MAIN}" checkout .
@@ -284,10 +292,10 @@ doh_upgrade_main() {
 
 doh_patch_main() {
     doh_profile_load
-    if [ x"${PROFILE_PATCHSET}" != x"" ]; then
+    if [ x"${CONF_MAIN_PATCHSET}" != x"" ]; then
         elog "fetching odoo patch"
         local patchset_tmp=`mktemp`
-        erunquiet wget -q -O "${patchset_tmp}" "${PROFILE_PATCHSET}"
+        erunquiet wget -q -O "${patchset_tmp}" "${CONF_MAIN_PATCHSET}"
         elog "apply odoo patch locally"
         erunquiet git -C "${DIR_MAIN}" apply "${patchset_tmp}"
         eremove "${patchset_tmp}"
@@ -296,11 +304,11 @@ doh_patch_main() {
 
 doh_install_extra() {
     doh_profile_load
-    if [ x"${EXTRA_URL}" != x"" ]; then
+    if [ x"${CONF_EXTRA_URL}" != x"" ]; then
         elog "fetching odoo extra modules"
         local extra_tmp=`mktemp`
         local extra_tmpdir=`mktemp -d`
-        erunquiet wget -q -O "${extra_tmp}" "${EXTRA_URL}"
+        erunquiet wget -q -O "${extra_tmp}" "${CONF_EXTRA_URL}"
         elog "extracting odoo extra modules"
         erunquiet 7z x -y "-o${extra_tmpdir}" "${extra_tmp}"
         rm -Rf extra
@@ -336,7 +344,7 @@ doh_sublime_project_template() {
     [
         {
             "follow_symlinks": true,
-            "name": "${PROFILE_NAME}",
+            "name": "${CONF_PROFILE_NAME}",
             "path": "./"
         }
     ]
@@ -348,7 +356,7 @@ EOF
 doh_run_server() {
     doh_profile_load
 
-    local v="${PROFILE_VERSION:-8.0}"
+    local v="${CONF_PROFILE_VERSION:-8.0}"
     if [ x"${v}" = x"8.0" ] || [ x"${v}" = "7.0" ]; then
         "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
     elif [ x"${v}" = "6.1" ] || [ x"${v}" = x"6.0" ]; then
@@ -361,7 +369,7 @@ doh_run_server() {
 doh_svc_is_running() {
     doh_profile_load
 
-    PIDFILE="${DIR_RUN}/${PROFILE_NAME}.pid"
+    PIDFILE="${DIR_RUN}/${CONF_PROFILE_NAME}.pid"
     if [ ! -x "${PIDFILE}" ]; then
         # no pidfile, probably not running.
         # still make a 2nd check is ps directly
@@ -382,15 +390,15 @@ doh_svc_is_running() {
 
 doh_svc_start() {
     if ! doh_svc_is_running; then
-        elog "Starting service: odoo-${PROFILE_NAME}"
-        erunquiet sudo service "odoo-${PROFILE_NAME}" start
+        elog "Starting service: odoo-${CONF_PROFILE_NAME}"
+        erunquiet sudo service "odoo-${CONF_PROFILE_NAME}" start
     fi
 }
 
 doh_svc_stop() {
     if doh_svc_is_running; then
-        elog "Stopping service: odoo-${PROFILE_NAME}"
-        erunquiet sudo service "odoo-${PROFILE_NAME}" stop
+        elog "Stopping service: odoo-${CONF_PROFILE_NAME}"
+        erunquiet sudo service "odoo-${CONF_PROFILE_NAME}" stop
     fi
 }
 
@@ -487,10 +495,10 @@ HELP_CMD_INIT
 
     local n_profile_name='PROFILE_NAME'
     local n_profile_version='8.0'
-    local n_profile_repo='http://github.com/odoo/odoo'
-    local n_profile_branch='8.0'
     local n_profile_update_url=''
     local n_profile_autostart='0'
+    local n_main_repo='https://github.com/odoo/odoo'
+    local n_main_branch='8.0'
 
     if [ x"${autostart}" != x"" ]; then
         n_profile_autostart='1'
@@ -502,7 +510,7 @@ HELP_CMD_INIT
             local n_name="${template:5}"
             n_profile_name="${n_name}"
             n_profile_version="${n_name}"
-            n_profile_branch="${n_name}"
+            n_main_branch="${n_name}"
         else
             # TODO: implement custom template
             die "Custom template not implemented, use odoo/VERSION template instead."
@@ -513,11 +521,13 @@ HELP_CMD_INIT
 [profile]
 name=${n_profile_name}
 version=${n_profile_version}
-repo=${n_profile_repo}
-branch=${n_profile_branch}
-patchset=
 autostart=${n_profile_autostart}
 url=${n_profile_update_url}
+
+[main]
+repo=${n_main_repo}
+branch=${n_main_branch}
+patchset=
 
 [extra]
 repo=
@@ -584,7 +594,7 @@ HELP_CMD_INSTALL
 
     # override autostart if set on command line
     if [ x"$autostart" = x"true" ]; then
-        PROFILE_AUTOSTART="1"
+        CONF_PROFILE_AUTOSTART="1"
     fi
 
     # ensure all directories exists
@@ -595,7 +605,7 @@ HELP_CMD_INSTALL
 
     elog "fetching odoo from remote git repository (this can take some time...)"
     rm -Rf "${DIR_MAIN}"
-    erun git clone "${PROFILE_REPO}" -b "${PROFILE_BRANCH}" --single-branch "${DIR_MAIN}"
+    erun git clone "${CONF_MAIN_REPO}" -b "${CONF_MAIN_BRANCH}" --single-branch "${DIR_MAIN}"
 
     doh_patch_main
     doh_install_extra
@@ -612,9 +622,9 @@ HELP_CMD_INSTALL
 
     doh_config_init
 
-    if [ x"${PROFILE_AUTOSTART}" = x"1" ]; then
+    if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
         elog "starting odoo (sudo)"
-        erun sudo service odoo-${PROFILE_NAME} start
+        erun sudo service odoo-${CONF_PROFILE_NAME} start
 
         elog "installation sucessfull, you can now access odoo using http://localhost:8069/"
     else
@@ -657,7 +667,7 @@ HELP_CMD_CREATE_DB
     elog "creating database ${DB}"
     erunquiet createdb -E unicode "${DB}" || die "Unable to create database ${DB}"
     elog "initializing database ${DB} for odoo"
-    erunquiet doh_run_server -d "${DB}" --stop-after-init -i "${DB_INIT_MODULES_ON_CREATE:-base}" ${DB_INIT_EXTRA_ARGS} || die "Failed to initialize database ${DB}"
+    erunquiet doh_run_server -d "${DB}" --stop-after-init -i "${CONF_DB_INIT_MODULES_ON_CREATE:-base}" ${CONF_DB_INIT_EXTRA_ARGS} || die "Failed to initialize database ${DB}"
     elog "database ${DB} created successfully"
 }
 
