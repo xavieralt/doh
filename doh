@@ -5,6 +5,7 @@ DOH_VERSION="0.1"
 # Setup output logging
 DOH_LOGFILE=/tmp/doh.log
 DOH_LOGLEVEL="info"
+DOH_PROFILE_LOADED="0"
 
 doh_setup_logging() {
 
@@ -154,6 +155,10 @@ db_config_local_server() {
 }
 
 doh_config_init() {
+    doh_profile_load
+
+    TMPL_INIT_FILE="${DIR_MAIN}/debian/init"
+
     ODOO_ADDONS_PATH="${DIR_MAIN}/addons,${DIR_EXTRA}"
     ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
     ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
@@ -167,7 +172,7 @@ doh_config_init() {
         -e "s#^LOGFILE=.*\$#LOGFILE=${ODOO_LOG_FILE}#" \
         -e "s/^USER=.*\$/USER=${RUNAS}/" \
         -e "s#--pidfile /var/run/#--pidfile ${DIR_RUN}/#" \
-        "${DIR_MAIN}/debian/openerp.init" | erunquiet sudo tee "/etc/init.d/odoo-${PROFILE_NAME}"
+        ${TMPL_INIT_FILE} | erunquiet sudo tee "/etc/init.d/odoo-${PROFILE_NAME}"
     erunquiet sudo chmod 755 "/etc/init.d/odoo-${PROFILE_NAME}"
 
     elog "Generating Odoo config file"
@@ -193,13 +198,17 @@ EOF
     erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
     erunquiet sudo chown "${RUNAS}:adm" "${ODOO_LOG_FILE}"
 
-    if [ x"${PROFILE_AUTOSTART}" != x"" ]; then
+    if [ x"${PROFILE_AUTOSTART}" = x"1" ]; then
         elog "Adding Odoo '${PROFILE_NAME}' to autostart"
         erunquiet sudo update-rc.d "odoo-${PROFILE_NAME}" defaults
     fi
 }
 
 doh_profile_load() {
+    if [ x"${DOH_PROFILE_LOADED}" = x"1" ]; then
+        return
+    fi
+
     # $1: odoo.profile
     export DIR_ROOT="${PWD}"
     export DIR_MAIN="${PWD}/main"
@@ -234,9 +243,24 @@ doh_profile_load() {
         done <<< "${VARS}"
         IFS="$OLDIFS"
     done
+
+    DOH_PROFILE_LOADED="1"
+}
+
+doh_check_dirs() {
+    # check if required dirs exists
+    doh_profile_load
+
+    for dir in DIR_ROOT DIR_MAIN DIR_EXTRA DIR_LOGS DIR_RUN DIR_CONF; do
+        if [ ! -d "${!dir}" ]; then
+            elog "creating directory ${!dir}"
+            mkdir -p "${!dir}"
+        fi
+    done
 }
 
 doh_profile_update() {
+    doh_profile_load
     if [ x"${PROFILE_URL}" != x"" ]; then
         elog "updating odoo profile"
         tmp_profile=`mktemp`
@@ -246,13 +270,20 @@ doh_profile_update() {
 }
 
 doh_upgrade_main() {
-    elog "updating odoo source code"
-    erunquiet git -C "${DIR_MAIN}" checkout .
-    erunquiet git -C "${DIR_MAIN}" pull
+    doh_profile_load
+    if [ ! -d "${DIR_MAIN}/.git" ]; then
+        elog "fetching odoo source code"
+        erun git clone "${PROFILE_REPO}" -b "${PROFILE_BRANCH}" --single-branch "${DIR_MAIN}"
+    else
+        elog "updating odoo source code"
+        erunquiet git -C "${DIR_MAIN}" checkout .
+        erunquiet git -C "${DIR_MAIN}" pull
+    fi
     doh_patch_main
 }
 
 doh_patch_main() {
+    doh_profile_load
     if [ x"${PROFILE_PATCHSET}" != x"" ]; then
         elog "fetching odoo patch"
         local patchset_tmp=`mktemp`
@@ -264,6 +295,7 @@ doh_patch_main() {
 }
 
 doh_install_extra() {
+    doh_profile_load
     if [ x"${EXTRA_URL}" != x"" ]; then
         elog "fetching odoo extra modules"
         local extra_tmp=`mktemp`
@@ -295,6 +327,8 @@ doh_install_extra() {
 }
 
 doh_sublime_project_template() {
+    doh_profile_load
+
     PROJ_TMPL_FILE="${DIR_ROOT}/odoo.sublime-project"
     cat >"${PROJ_TMPL_FILE}" <<EOF
 {
@@ -312,6 +346,8 @@ EOF
 }
 
 doh_run_server() {
+    doh_profile_load
+
     local v="${PROFILE_VERSION:-8.0}"
     if [ x"${v}" = x"8.0" ] || [ x"${v}" = "7.0" ]; then
         "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
@@ -323,6 +359,8 @@ doh_run_server() {
 }
 
 doh_svc_is_running() {
+    doh_profile_load
+
     PIDFILE="${DIR_RUN}/${PROFILE_NAME}.pid"
     if [ ! -x "${PIDFILE}" ]; then
         # no pidfile, probably not running.
@@ -397,8 +435,6 @@ HELP_CMD_HELP
 }
 
 cmd_internal() {
-    doh_profile_load
-
     if [ $# -lt 1 ]; then
 	echo "usage: missing commands"
     fi
@@ -409,21 +445,32 @@ cmd_internal() {
 
 cmd_init() {
 : <<HELP_CMD_INIT
-doh init [-f] [DIR]
+doh init [-f] [-t VERSION] [DIR]
 
 Create a new odoo.profile
 
 options:
 
 -f                  force creation if odoo.profile already exists
+-a                  force autostart of profile
+-t TEMPLATE         generate a odoo profile based on template
+                    (you can use odoo/VERSION for standard template)
 HELP_CMD_INIT
 
     local force="0"
+    local template=""
+    local autostart=""
     OPTIND=1
-    while getopts ":f" opt; do
+    while getopts "ft:" opt; do
         case $opt in
             f)
                 force="1"
+                ;;
+            a)
+                autostart="1"
+                ;;
+            t)
+                template="${OPTARG}"
                 ;;
         esac
     done
@@ -438,15 +485,39 @@ HELP_CMD_INIT
         die "Unable to create template odoo.profile, file exists. Use -f to override"
     fi
 
+    local n_profile_name='PROFILE_NAME'
+    local n_profile_version='8.0'
+    local n_profile_repo='http://github.com/odoo/odoo'
+    local n_profile_branch='8.0'
+    local n_profile_update_url=''
+    local n_profile_autostart='0'
+
+    if [ x"${autostart}" != x"" ]; then
+        n_profile_autostart='1'
+    fi
+
+    if [ x"${template}" != x"" ]; then
+
+        if [[ "${template}" =~ ^odoo/.* ]]; then
+            local n_name="${template:5}"
+            n_profile_name="${n_name}"
+            n_profile_version="${n_name}"
+            n_profile_branch="${n_name}"
+        else
+            # TODO: implement custom template
+            die "Custom template not implemented, use odoo/VERSION template instead."
+        fi
+    fi
+
     cat <<TMPL_ODOO_PROFILE >${DIR}/odoo.profile
 [profile]
-name=PROFILE_NAME
-version=8.0
-repo=http://github.com/odoo/odoo
-branch=8.0
+name=${n_profile_name}
+version=${n_profile_version}
+repo=${n_profile_repo}
+branch=${n_profile_branch}
 patchset=
-autostart=1
-url=UPDATE_URL
+autostart=${n_profile_autostart}
+url=${n_profile_update_url}
 
 [extra]
 repo=
@@ -513,16 +584,11 @@ HELP_CMD_INSTALL
 
     # override autostart if set on command line
     if [ x"$autostart" = x"true" ]; then
-        PROFILE_AUTOSTART=true
+        PROFILE_AUTOSTART="1"
     fi
 
     # ensure all directories exists
-    for dir in DIR_ROOT DIR_MAIN DIR_EXTRA DIR_LOGS DIR_RUN DIR_CONF; do
-        if [ ! -d "${!dir}" ]; then
-            elog "creating directory ${!dir}"
-            mkdir -p "${!dir}"
-        fi
-    done
+    doh_check_dirs
 
     elog 'installing prerequisite dependencies (sudo)'
     install_bootstrap_depends
@@ -546,10 +612,14 @@ HELP_CMD_INSTALL
 
     doh_config_init
 
-    elog "starting odoo (sudo)"
-    erun sudo service odoo-${PROFILE_NAME} start
+    if [ x"${PROFILE_AUTOSTART}" = x"1" ]; then
+        elog "starting odoo (sudo)"
+        erun sudo service odoo-${PROFILE_NAME} start
 
-    elog "installation sucessfull, you can now access odoo using http://localhost:8069/"
+        elog "installation sucessfull, you can now access odoo using http://localhost:8069/"
+    else
+        elog "installation sucessfull, do not forget to start server (doh start) before accessing odoo using http://localhost:8069/"
+    fi
 }
 
 cmd_upgrade() {
@@ -559,6 +629,7 @@ HELP_CMD_UPGRADE
 
     doh_profile_load
     doh_profile_update
+    doh_check_dirs
 
     doh_upgrade_main
     doh_install_extra
@@ -596,7 +667,7 @@ doh drop-db NAME
 
 HELP_CMD_DROP_DB
     if [ $# -lt 1 ]; then
-        echo "Usage: doh drop-db: missing arguemnt -- NAME"
+        echo "Usage: doh drop-db: missing arguments -- NAME"
         cmd_help "drop_db"
     fi
     DB="$1"
@@ -606,6 +677,25 @@ HELP_CMD_DROP_DB
     doh_svc_stop
     elog "droping database ${DB}"
     erunquiet dropdb "${DB}" || die "Unable to drop database ${DB}"
+}
+
+cmd_copy_db() {
+: <<HELP_CMD_COPY_DB
+doh copy-db TEMPLATE_NAME NAME
+
+HELP_CMD_COPY_DB
+    if [ $# -lt 2 ]; then
+        echo "Usage: doh copy-db: missing arguments -- TEMPLATE_NAME NAME"
+        cmd_help "copy_db"
+    fi
+    TMPL_DB="$1"
+    DB="$2"
+
+    doh_profile_load
+    db_client_setup_env
+    doh_svc_stop
+    elog "copying database ${TMPL_DB} to ${DB}"
+    erunquiet psql postgres -c "CREATE DATABASE ${DB} ENCODING 'unicode' TEMPLATE ${TMPL_DB}" || die "Unable to copy database ${TMPL_DB} to ${DB}"
 }
 
 cmd_upgrade_db() {
