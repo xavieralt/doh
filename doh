@@ -147,9 +147,11 @@ install_bootstrap_depends() {
     erunquiet sudo apt-get -y --no-install-recommends install p7zip-full git
 }
 
-install_odoo_depends() {
+doh_check_odoo_depends() {
+    doh_profile_load
+
     DEPENDS=$(sed -ne '/^Depends:/, /^[^ ]/{/^Depends:/{n;n};/^[^ ]/{q;};s/,$//;p;}' \
-        "$1/debian/control")
+        "${DIR_MAIN}/debian/control")
     erunquiet sudo apt-get -y --no-install-recommends install ${DEPENDS}
 }
 
@@ -707,7 +709,7 @@ HELP_CMD_INSTALL
     doh_update_section "extra"
 
     elog "installing odoo dependencies (sudo)"
-    install_odoo_depends "${DIR_MAIN}"
+    doh_check_odoo_depends
 
     if [ x"$local_database" = x"true" ]; then
         elog "installing postgresql server (sudo)"
