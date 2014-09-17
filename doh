@@ -4,7 +4,7 @@ DOH_VERSION="0.1"
 
 # Setup output logging
 DOH_LOGFILE=/tmp/doh.log
-DOH_LOGLEVEL="info"
+DOH_LOGLEVEL="${DOH_LOGLEVEL:-info}"
 DOH_PROFILE_LOADED="0"
 
 doh_setup_logging() {
@@ -24,6 +24,8 @@ exec 5<>${DOH_LOGFILE}
 #
 
 declare -A LOG_COLOR=([INFO]=37 [DEBUG]=34 [WARN]=33 [OK]=32 [ERROR]=31)
+declare TRUE=0
+declare FALSE=1
 
 eecho() {
     # echo "$@" | tee -a ${LOG_FILE}
@@ -104,7 +106,42 @@ eremove() {
         rm -Rf "$1"
     fi
 }
+conf_get() {
+    # $1: key, $2: default value
+    r=$(key="${1^^}"; confkey="CONF_${key//./_}"; echo -n "${!confkey:-${2}}")
+    echo -n "${r}"
+    if [ x"${r}" = x"" ]; then
+        return $FALSE
+    else
+        return $TRUE
+    fi
+}
 
+assert_in() {
+    local r=$FALSE
+    for v in $2; do
+        if [ x"$1" = x"$v" ]; then
+            r=$TRUE
+        fi
+    done
+    return $r
+}
+
+_H_KNOWN_REPO_TYPE="git bzr hg"
+
+helper_is_dir_repo() {
+    # 1: dir, 2: repository type
+    assert_in "git" "${_H_KNOWN_REPO_TYPE}" || die 'Invalid repository type $2'
+    local dir_path="$1"
+    local repo_type="$2"
+    local dir_repo_path="${dir_path}/.${repo_type}"
+
+    if [ -d "${dir_path}" ] && [ -d "${dir_repo_path}" ]; then
+        return $TRUE
+    else
+        return $FALSE
+    fi
+}
 
 install_bootstrap_depends() {
     erunquiet sudo apt-get -y --no-install-recommends install p7zip-full git
@@ -157,12 +194,17 @@ db_config_local_server() {
 doh_config_init() {
     doh_profile_load
 
-    TMPL_INIT_FILE="${DIR_MAIN}/debian/init"
 
-    ODOO_ADDONS_PATH="${DIR_MAIN}/addons,${DIR_EXTRA}"
+    ODOO_ADDONS_PATH="${DIR_ADDONS},${DIR_EXTRA}"
     ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
     ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
     RUNAS="$USER"
+
+    TMPL_INIT_FILE="${DIR_MAIN}/debian/init"
+    if [ x"${CONF_PROFILE_VERSION:-8.0}" = x"6.0" ]; then
+        TMPL_INIT_FILE="${DIR_MAIN}/debian/openerp-server.init"
+    fi
+
 
     elog "Generating Odoo init script"
     sed \
@@ -212,6 +254,7 @@ doh_profile_load() {
     # $1: odoo.profile
     export DIR_ROOT="${PWD}"
     export DIR_MAIN="${PWD}/main"
+    export DIR_ADDONS="${PWD}/main/addons"
     export DIR_EXTRA="${PWD}/extra"
     export DIR_CONF="${PWD}/conf"
     export DIR_LOGS="${PWD}/logs"
@@ -247,9 +290,20 @@ doh_profile_load() {
 
     if [ x"${CONF_MAIN}" = x"" ]; then
         # old profile version, move main specific part to main
+        export CONF_MAIN="1"
         export CONF_MAIN_BRANCH="${CONF_PROFILE_BRANCH}"
         export CONF_MAIN_REPO="${CONF_PROFILE_REPO}"
         export CONF_MAIN_PATCHSET="${CONF_PROFILE_PATCHSET}"
+        export CONF_EXTRA_TYPE="${CONF_EXTRA_TYPE:-archive}"  # set extra, as type="archive"
+    fi
+
+    if [ x"${CONF_ADDONS}" != x"" ]; then
+        # addons is in a separate directory
+        local ADDONS_PATH="${DIR_ROOT}/addons"
+        if [ x"${CONF_ADDONS_SUBDIR}" != x"" ]; then
+            ADDONS_PATH="${ADDONS_PATH}/${CONF_ADDONS_SUBDIR}"
+        fi
+        export DIR_ADDONS="${ADDONS_PATH}"
     fi
 
     DOH_PROFILE_LOADED="1"
@@ -259,12 +313,104 @@ doh_check_dirs() {
     # check if required dirs exists
     doh_profile_load
 
-    for dir in DIR_ROOT DIR_MAIN DIR_EXTRA DIR_LOGS DIR_RUN DIR_CONF; do
+    for dir in DIR_ROOT DIR_MAIN DIR_ADDONS DIR_EXTRA DIR_LOGS DIR_RUN DIR_CONF; do
         if [ ! -d "${!dir}" ]; then
             elog "creating directory ${!dir}"
             mkdir -p "${!dir}"
         fi
     done
+}
+
+doh_update_section() {
+    [ $# -lt 1 ] && return
+    # whitelist allowed sections
+    doh_profile_load
+
+    ([ x"${1,,}" != x"main" ] && [ x"${1,,}" != x"addons" ] && [ x"${1,,}" != x"extra" ]) && die 'Invalid section ${section}'
+    [ x"$(conf_get "${1}")" != x"1" ] && return  # section is not defined
+
+    local section="${1^^}"
+    local section_dir=$(d="DIR_${section^^}"; echo -n "${!d}")
+    local section_repo_url=$(conf_get "${section}.repo")
+    local section_type=$(conf_get "${section}.type" "git")
+    local section_branch=$(conf_get "${section}.branch")
+    local section_patchset=$(conf_get "${section}.patchset")
+    local section_sparsecheckout=$(conf_get "${section}.sparse_checkout")
+
+    if [[ x"${section_type}" = x"git" ]]; then
+
+        [ x"${section_repo_url}" = x"" ] && die "No repository url specified for section ${1}"
+        [ x"${section_branch}" = x"" ] && die "No branch specified for section ${1}"
+
+        if ! helper_is_dir_repo "${section_dir}" "${section_type}" "${section_repo_url}"; then
+            edebug "creating new empty repository"
+            erun rm -Rf -- "${section_dir}"
+            erun git init "${section_dir}"
+        fi
+
+        # check origin remote url
+        local remote_url=$(git -C "${section_dir}" config --get remote.origin.url)
+        if [ x"${remote_url}" != x"${section_repo_url}" ]; then
+            if [ x"${remote_url}" != x"" ]; then
+                erun git -C "${section_dir}" remote remove origin
+            fi
+            erun git -C "${section_dir}" remote add origin "${section_repo_url}"
+        fi
+
+        # check for sparse checkout
+        erun git -C "${section_dir}" config core.sparsecheckout true
+        local sparsecheckout_path="${section_dir}/.git/info/sparse-checkout"
+        if [ x"${section_sparsecheckout}" != x"" ]; then
+            echo "${section_sparsecheckout}" | tr ',' '\n'  > "${sparsecheckout_path}"
+        else
+            echo '/*' > "${sparsecheckout_path}" # default, all files
+        fi
+
+        erun git -C "${section_dir}" checkout -f . # remove local changes
+        erun git -C "${section_dir}" pull -f origin "${section_branch}"
+        erun git -C "${section_dir}" checkout -f "${section_branch}"
+
+    elif [ x"${section_type}" = x"archive" ]; then
+        elog "fetching odoo extra modules"
+        local extra_tmp=`mktemp`
+        local extra_tmpdir=`mktemp -d`
+        erunquiet wget -q -O "${extra_tmp}" "${CONF_EXTRA_URL}"
+        elog "extracting odoo extra modules"
+        erunquiet 7z x -y "-o${extra_tmpdir}" "${extra_tmp}"
+        rm -Rf "${section_dir}"
+        mkdir "${section_dir}"
+        local module_parent_dirs=""
+        for module_path in $(find "${extra_tmpdir}" -name __openerp__.py -exec dirname {} \;); do
+            module_parent_path=$(dirname "${module_path}")
+            module_parent_dirs="${module_parent_dir}\n${module_parent_path}"
+            local module_name=$(basename "${module_path}")
+            elog "extracting module -- ${module_name}"
+            mv "${module_path}" "${section_dir}"
+        done
+        module_parent_dir_unique=$(echo -e "${module_parent_dirs}" | sed '/^$/d' | sort -u | wc -l)
+        if [ $module_parent_dir_unique -eq 1 ]; then
+            module_parent_dir=$(echo -e "${module_parent_dirs}" | sed '/^$/d' | sort -u)
+            if [ -d "${module_parent_dir}/.git" ]; then
+                elog "extracting extra git repository"
+                mv "${module_parent_dir}/.git" "${section_dir}"
+            fi
+        fi
+        eremove "${extra_tmp}"
+        eremove "${extra_tmpdir}"
+    else
+        die "Unknown section type ${section_type}"
+    fi
+
+
+    if [ x"${section_patchset}" != x"" ]; then
+        pushd "${section_dir}"
+        elog "fetching odoo patch"
+        local patchset_tmp=`mktemp`
+        erunquiet wget -q -O "${patchset_tmp}" "${section_patchset}"
+        elog "apply odoo patch locally"
+        erunquiet git -C "${section_dir}" apply "${patchset_tmp}"
+        eremove "${patchset_tmp}"
+    fi
 }
 
 doh_profile_update() {
@@ -274,63 +420,6 @@ doh_profile_update() {
         tmp_profile=`mktemp`
         erunquiet wget -q -O "${tmp_profile}" "${CONF_PROFILE_URL}" || die 'Unable to update odoo profile'
         mv "${tmp_profile}" "${DIR_ROOT}/odoo.profile"
-    fi
-}
-
-doh_upgrade_main() {
-    doh_profile_load
-    if [ ! -d "${DIR_MAIN}/.git" ]; then
-        elog "fetching odoo source code"
-        erun git clone "${CONF_MAIN_REPO}" -b "${CONF_MAIN_BRANCH}" --single-branch "${DIR_MAIN}"
-    else
-        elog "updating odoo source code"
-        erunquiet git -C "${DIR_MAIN}" checkout .
-        erunquiet git -C "${DIR_MAIN}" pull
-    fi
-    doh_patch_main
-}
-
-doh_patch_main() {
-    doh_profile_load
-    if [ x"${CONF_MAIN_PATCHSET}" != x"" ]; then
-        elog "fetching odoo patch"
-        local patchset_tmp=`mktemp`
-        erunquiet wget -q -O "${patchset_tmp}" "${CONF_MAIN_PATCHSET}"
-        elog "apply odoo patch locally"
-        erunquiet git -C "${DIR_MAIN}" apply "${patchset_tmp}"
-        eremove "${patchset_tmp}"
-    fi
-}
-
-doh_install_extra() {
-    doh_profile_load
-    if [ x"${CONF_EXTRA_URL}" != x"" ]; then
-        elog "fetching odoo extra modules"
-        local extra_tmp=`mktemp`
-        local extra_tmpdir=`mktemp -d`
-        erunquiet wget -q -O "${extra_tmp}" "${CONF_EXTRA_URL}"
-        elog "extracting odoo extra modules"
-        erunquiet 7z x -y "-o${extra_tmpdir}" "${extra_tmp}"
-        rm -Rf extra
-        mkdir extra
-        local module_parent_dirs=""
-        for module_path in $(find "${extra_tmpdir}" -name __openerp__.py -exec dirname {} \;); do
-            module_parent_path=$(dirname "${module_path}")
-            module_parent_dirs="${module_parent_dir}\n${module_parent_path}"
-            local module_name=$(basename "${module_path}")
-            elog "extracting module -- ${module_name}"
-            mv "${module_path}" "${DIR_EXTRA}"
-        done
-        module_parent_dir_unique=$(echo -e "${module_parent_dirs}" | sed '/^$/d' | sort -u | wc -l)
-        if [ $module_parent_dir_unique -eq 1 ]; then
-            module_parent_dir=$(echo -e "${module_parent_dirs}" | sed '/^$/d' | sort -u)
-            if [ -d "${module_parent_dir}/.git" ]; then
-                elog "extracting extra git repository"
-                mv "${module_parent_dir}/.git" "${DIR_EXTRA}"
-            fi
-        fi
-        eremove "${extra_tmp}"
-        eremove "${extra_tmpdir}"
     fi
 }
 
@@ -604,11 +693,9 @@ HELP_CMD_INSTALL
     install_bootstrap_depends
 
     elog "fetching odoo from remote git repository (this can take some time...)"
-    rm -Rf "${DIR_MAIN}"
-    erun git clone "${CONF_MAIN_REPO}" -b "${CONF_MAIN_BRANCH}" --single-branch "${DIR_MAIN}"
-
-    doh_patch_main
-    doh_install_extra
+    doh_update_section "main"
+    doh_update_section "addons"
+    doh_update_section "extra"
 
     elog "installing odoo dependencies (sudo)"
     install_odoo_depends "${DIR_MAIN}"
@@ -641,8 +728,9 @@ HELP_CMD_UPGRADE
     doh_profile_update
     doh_check_dirs
 
-    doh_upgrade_main
-    doh_install_extra
+    doh_update_section "main"
+    doh_update_section "addons"
+    doh_update_section "extra"
 
     if [ $# -gt 0 ]; then
         for db in $@; do
