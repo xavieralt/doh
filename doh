@@ -340,7 +340,7 @@ doh_profile_load() {
 
     local profile="${1:-odoo.profile}"
     if [[ "${profile}" =~ ^(http|ftp)[s]?://.* ]]; then
-        elog "loading remote profile from: ${profile}"
+        edebug "loading remote profile from: ${profile}"
         # wget + load file
         rm -f /tmp/odoo.profile
         wget -q -O "${DIR_ROOT}/odoo.profile" "${profile}" || die 'Unable to fetch remote profile'
@@ -349,7 +349,7 @@ doh_profile_load() {
         if [ ! "${profile}" -ef "${DIR_ROOT}/odoo.profile" ]; then
             cp "${profile}" "${DIR_ROOT}/odoo.profile"
         fi
-        elog "loading local profile file: ${profile}"
+        edebug "loading local profile file: ${profile}"
     else
         die "unable to load profile: ${profile}"
     fi
