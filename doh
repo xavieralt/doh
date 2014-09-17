@@ -446,7 +446,7 @@ doh_run_server() {
     doh_profile_load
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
-    if [ x"${v}" = x"8.0" ] || [ x"${v}" = "7.0" ]; then
+    if [ x"${v}" = x"8.0" ] || [ x"${v}" = x"7.0" ] || [ x"${v}" = x"master" ]; then
         "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
     elif [ x"${v}" = "6.1" ] || [ x"${v}" = x"6.0" ]; then
         "${DIR_MAIN}/bin/openerp-server.py" -c "${DIR_CONF}/odoo-server.conf" "$@"
