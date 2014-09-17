@@ -106,7 +106,8 @@ eremove() {
         rm -Rf "$1"
     fi
 }
-conf_get() {
+
+conf_env_get() {
     # $1: key, $2: default value
     r=$(key="${1^^}"; confkey="CONF_${key//./_}"; echo -n "${!confkey:-${2}}")
     echo -n "${r}"
@@ -116,6 +117,81 @@ conf_get() {
         return $TRUE
     fi
 }
+
+conf_file_get_sections() {
+    local conffile="$1"
+    sed -n '/^\[\(.*\)\]/{s/\[//;s/\]//;p}' "${conffile}"
+}
+
+conf_file_get_options() {
+    local conffile="$1"
+    local section="$2"
+    if (grep -E "^\[${section}\]$" "${conffile}" >/dev/null); then
+        sed -n "/\[${section}]/,/^\[/{/^\[/d;/^$/d;/^#/d;p}" "${conffile}"
+        return $TRUE
+    else
+        return $FALSE
+    fi
+}
+
+conf_file_get() {
+    # $1: conf file, $2: section.option
+    local conffile="$1"
+    local section="${2%%.*}"
+    local option="${2#*.}"
+    local opt_name=""
+    local opt_value=""
+
+    OLDIFS="${IFS}"
+    local VARS=$(conf_file_get_options "${conffile}" "${section}")
+    IFS=$'\n'; while read -r var; do
+        opt_name="${var%%=*}"
+        opt_value="${var#*=}"
+        if [ x"${opt_name}" = x"${option}" ]; then
+            echo -n "${opt_value}"
+            break;
+        fi
+    done <<< "${VARS}"
+    IFS="$OLDIFS"
+}
+
+conf_file_set() {
+    # $1: conf file, $2: section.option, $3: value
+    local conffile="$1"
+    local section="${2%%.*}"
+    local option="${2#*.}"
+    local value="$3"
+
+    section_values=$(conf_file_get_options "${conffile}" "${section}")
+    if [ $? -eq $TRUE ]; then
+        if [ $? -eq $TRUE ]; then
+            sed -i -e "/\[${section}]/,/^\[/ {
+                /^${option}=/ {
+                    # s#.*#${option}=${value}#
+                    c\
+${option}=${value}
+                };
+            };
+            " "${conffile}"
+        else
+            sed -i -e "/\[${section}]/,/^\[/ {
+                /\[${section}\]/n;
+                /^\[/ {
+                    i\
+${option}=${value}
+                };
+                $ {
+                    a\
+${option}=${value}
+                }
+            };
+            " "${conffile}"
+        fi
+    else
+        echo -e "\n[${section}]\n${option}=${value}" >> "${conffile}"
+    fi
+}
+
 
 assert_in() {
     local r=$FALSE
@@ -278,10 +354,10 @@ doh_profile_load() {
         die "unable to load profile: ${profile}"
     fi
     OLDIFS="${IFS}"
-    SECTIONS=$(sed -n '/^\[\(.*\)\]/{s/\[//;s/\]//;p}' "${DIR_ROOT}/odoo.profile")
+    SECTIONS=$(conf_file_get_sections "${DIR_ROOT}/odoo.profile")
     for section in ${SECTIONS}; do
         export CONF_${section^^}="1"  # mark section as present
-        VARS=$(sed -n "/\[${section}]/,/^\[/{/^\[/d;/^$/d;/^#/d;p}" "${profile}")
+        VARS=$(conf_file_get_options "${DIR_ROOT}/odoo.profile" "${section}")
         IFS=$'\n'; while read -r var; do
             var_name="${var%%=*}"
             var_value="${var#*=}"
@@ -329,15 +405,15 @@ doh_update_section() {
     doh_profile_load
 
     ([ x"${1,,}" != x"main" ] && [ x"${1,,}" != x"addons" ] && [ x"${1,,}" != x"extra" ]) && die 'Invalid section ${section}'
-    [ x"$(conf_get "${1}")" != x"1" ] && return  # section is not defined
+    [ x"$(conf_env_get "${1}")" != x"1" ] && return  # section is not defined
 
     local section="${1^^}"
     local section_dir=$(d="DIR_${section^^}"; echo -n "${!d}")
-    local section_repo_url=$(conf_get "${section}.repo")
-    local section_type=$(conf_get "${section}.type" "git")
-    local section_branch=$(conf_get "${section}.branch")
-    local section_patchset=$(conf_get "${section}.patchset")
-    local section_sparsecheckout=$(conf_get "${section}.sparse_checkout")
+    local section_repo_url=$(conf_env_get "${section}.repo")
+    local section_type=$(conf_env_get "${section}.type" "git")
+    local section_branch=$(conf_env_get "${section}.branch")
+    local section_patchset=$(conf_env_get "${section}.patchset")
+    local section_sparsecheckout=$(conf_env_get "${section}.sparse_checkout")
 
     if [[ x"${section_type}" = x"git" ]]; then
 
@@ -509,6 +585,7 @@ Usage: doh CMD [OPTS...]
 Available commands
   install    install and setup a new odoo instance
   upgrade    upgrade odoo and extra modules
+  config     get and set odoo profile options
   create-db  create a new database using current profile
   drop-db    drop an existing database
   upgrade-db upgrade a specific database
@@ -540,6 +617,59 @@ cmd_internal() {
 
     CMD="doh_${1//-/_}"; shift;
     $CMD $@
+}
+
+cmd_config() {
+: <<HELP_CMD_CONFIG
+doh config [-l] name [value]
+
+Get and set odoo profile options
+
+options:
+
+-l            list all profile variables
+HELP_CMD_CONFIG
+    local listall="0"
+
+    OPTIND=1
+    while getopts ":l" opt; do
+        case $opt in
+            l)
+                listall="1"
+                ;;
+        esac
+    done
+    shift $(($OPTIND - 1))
+
+    if [ x"${listall}" != x"1" ] && [ $# -lt 1 ]; then
+        echo "Usage: doh config: missing argument -- NAME"
+        cmd_help "config"
+    fi
+
+    doh_profile_load
+    local conffile="${DIR_ROOT}/odoo.profile"
+
+    if [ x"${listall}" = x"1" ]; then
+        local SECTIONS=$(conf_file_get_sections "${conffile}")
+        local OLDIFS="${IFS}"
+        local opt_name=""
+        local opt_value=""
+
+        for section in ${SECTIONS}; do
+            VARS=$(conf_file_get_options "${DIR_ROOT}/odoo.profile" "${section}")
+            IFS=$'\n'; while read -r var; do
+                opt_name="${var%%=*}"
+                opt_value="${var#*=}"
+                echo "${section}.${opt_name}=${opt_value}"
+            done <<< "${VARS}"
+            IFS="$OLDIFS"
+        done
+
+    elif [ $# -ge 2 ]; then
+        conf_file_set "${DIR_ROOT}/odoo.profile" "$1" "$2"
+    else
+        echo $(conf_file_get "${DIR_ROOT}/odoo.profile" "$1")
+    fi
 }
 
 cmd_init() {
