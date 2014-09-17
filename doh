@@ -618,36 +618,38 @@ repo=${n_main_repo}
 branch=${n_main_branch}
 patchset=
 
-[extra]
-repo=
-url=
+# [extra]
+# repo=
+# url=
 
-[db]
-host=
-port=
-user=
-pass=
-init_modules_on_create=base
-init_extra_args=
+# [db]
+# host=
+# port=
+# user=
+# pass=
+# init_modules_on_create=base
+# init_extra_args=
 
 TMPL_ODOO_PROFILE
 }
 
 cmd_install() {
 : <<HELP_CMD_INSTALL
-doh install [-d] [-a] [-p URL INSTALL_DIR]
+doh install [-d] [-a] [-t TEMPLATE | -p URL] [INSTALL_DIR]
 
 options:
 
  -d                  install PostgreSQL database server
  -a                  automated startup, start on system boot
  -p URL INSTALL_DIR  load profile from a remote url
+ -t TEMPLATE         load profile using a predefined template
 HELP_CMD_INSTALL
 
     local profdir=""
     local profname=""
+    local template=""
     OPTIND=1
-    while getopts "dap::" opt; do
+    while getopts "dat:p:" opt; do
         case $opt in
             d)
                 # Install and use local database
@@ -658,13 +660,10 @@ HELP_CMD_INSTALL
                 local autostart=true
                 ;;
             p)
-                if [ $# -lt ${OPTIND} ]; then
-                    echo "doh: missing parameter for option -- p"
-                    cmd_help "install"
-                fi
-                profdir=${!OPTIND}
                 profname="${OPTARG}"
-                OPTIND=$(($OPTIND + 1))
+                ;;
+            t)
+                template="${OPTARG}"
                 ;;
             \?)
                 cmd_help "install"
@@ -672,13 +671,23 @@ HELP_CMD_INSTALL
         esac
     done
     shift $(($OPTIND - 1))
+    profdir="${1:-.}"
 
-    if [ x"$profdir" != x"" ]; then
-        if [ ! -d "$profdir" ]; then
-            mkdir -p "$profdir"
-        fi
-        cd "$profdir"
+    if [ x"$template" = x"" ] && [ x"$profname" = x"" ]; then
+        echo "Usage: doh install: missing argument -- template or profile"
+        echo -e "    you need to specify at least a template or a profile url\n"
+        cmd_help "install"
     fi
+
+    if [ ! -d "$profdir" ]; then
+        mkdir -p "$profdir"
+    fi
+    cd "$profdir"
+
+    if [ x"$template" != x"" ]; then
+        cmd_init -t "$template"
+    fi
+
     doh_profile_load "${profname}"
 
     # override autostart if set on command line
