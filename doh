@@ -285,21 +285,40 @@ install_postgresql_server() {
 }
 
 db_client_setup_env() {
-    if [ x"$DB_HOST" != x"" ]; then
-        if [ x"$DB_USER" = x"" ]; then
+    doh_profile_load
+
+    if [ x"$CONF_DB_HOST" != x"" ]; then
+        if [ x"$CONF_DB_USER" = x"" ]; then
             die "Config parameter DB_USER is mandatory when using DB_HOST"
         fi
-        if [ x"$DB_PASS" = x"" ]; then
+        if [ x"$CONF_DB_PASS" = x"" ]; then
             die "Config parameter DB_PASS is mandatory when using DB_HOST"
         fi
     fi
     for v in HOST PORT USER PASS; do
-        db_var="DB_${v}"
+        db_var="CONF_DB_${v}"
         pg_var="PG${v}"
         if [ x"${!db_var}" != x"" ]; then
             export $pg_var=${!db_var}
         fi
     done
+}
+
+db_get_server_version() {
+    db_client_setup_env
+    echo -n $(psql -A -t -c 'SHOW server_version' postgres)
+}
+
+db_get_server_local_cmd() {
+    local v=$(db_get_server_version | cut -d'.' -f -2)
+    local server_bin_path="/usr/lib/postgresql/${v}/bin"
+
+    if [ -d "${server_bin_path}" ]; then
+        echo -n "${server_bin_path}/$1"
+    else
+        # no specific version, fallback to standard PATH search order
+        echo "$1"
+    fi
 }
 
 db_config_local_server() {
@@ -964,12 +983,13 @@ HELP_CMD_CREATE_DB
         echo "Usage: doh create-db: missing arguemnt -- NAME"
         cmd_help "create_db"
     fi
+    local createdb=$(db_get_server_local_cmd "dropdb")
     DB="$1"
 
     doh_profile_load
     db_client_setup_env
     elog "creating database ${DB}"
-    erunquiet createdb -E unicode "${DB}" || die "Unable to create database ${DB}"
+    erunquiet "${createdb}" -E unicode "${DB}" || die "Unable to create database ${DB}"
     elog "initializing database ${DB} for odoo"
     erunquiet doh_run_server -d "${DB}" --stop-after-init -i "${CONF_DB_INIT_MODULES_ON_CREATE:-base}" ${CONF_DB_INIT_EXTRA_ARGS} || die "Failed to initialize database ${DB}"
     elog "database ${DB} created successfully"
@@ -984,13 +1004,14 @@ HELP_CMD_DROP_DB
         echo "Usage: doh drop-db: missing arguments -- NAME"
         cmd_help "drop_db"
     fi
+    local dropdb=$(db_get_server_local_cmd "dropdb")
     DB="$1"
 
     doh_profile_load
     db_client_setup_env
     doh_svc_stop
     elog "droping database ${DB}"
-    erunquiet dropdb "${DB}" || die "Unable to drop database ${DB}"
+    erunquiet "${dropdb}" "${DB}" || die "Unable to drop database ${DB}"
 }
 
 cmd_copy_db() {
@@ -1002,6 +1023,7 @@ HELP_CMD_COPY_DB
         echo "Usage: doh copy-db: missing arguments -- TEMPLATE_NAME NAME"
         cmd_help "copy_db"
     fi
+    local psql=$(db_get_server_local_cmd "psql")
     TMPL_DB="$1"
     DB="$2"
 
@@ -1009,7 +1031,7 @@ HELP_CMD_COPY_DB
     db_client_setup_env
     doh_svc_stop
     elog "copying database ${TMPL_DB} to ${DB}"
-    erunquiet psql postgres -c "CREATE DATABASE ${DB} ENCODING 'unicode' TEMPLATE ${TMPL_DB}" || die "Unable to copy database ${TMPL_DB} to ${DB}"
+    erunquiet "${psql}" postgres -c "CREATE DATABASE ${DB} ENCODING 'unicode' TEMPLATE ${TMPL_DB}" || die "Unable to copy database ${TMPL_DB} to ${DB}"
 }
 
 cmd_upgrade_db() {
