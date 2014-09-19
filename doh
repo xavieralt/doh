@@ -127,10 +127,30 @@ conf_file_get_options() {
     local conffile="$1"
     local section="$2"
     if (grep -E "^\[${section}\]$" "${conffile}" >/dev/null); then
-        sed -n "/\[${section}]/,/^\[/{/^\[/d;/^$/d;/^#/d;p}" "${conffile}"
+        sed -n "/^\[${section}\]/,$ { /^\[/{s/^\[\(.*\)\]$/\1/; x; d}; x; /^${section}$/!{x; d; n}; x; /^#/d; p;}" "${conffile}"
         return $TRUE
     else
         return $FALSE
+    fi
+}
+
+conf_file_unset() {
+    local conffile="$1"
+    local section="${2%%.*}"
+    local option="${2#*.}"
+
+    if [ x"${option}" != x"" ]; then
+        # remove the specific option
+        sed -i "/^\[${section}\]/,$ { /^\[/{h; s/^\[\(.*\)\]$/\1/; x;}; x; /^${section}$/{x; /^${option}=/d; x}; x;}" "${conffile}"
+
+        local x=$(conf_file_get_options "${conffile}" "${section}" | sed '/^$/d' | wc -l)
+        if [ $x -eq 0 ]; then
+            # no more option, remote the section
+            sed -i "/^\[${section}\]/d" "${conffile}"
+        fi
+    # else
+    #     # remote the whole section
+    #     sed -i "/^\[${section}\]/,$ { /^\[/{h; s/^\[\(.*\)\]$/\1/; x;}; x; /^${section}$/{x; d; n;}; x; /^#/d;}" "${conffile}"
     fi
 }
 
@@ -162,31 +182,60 @@ conf_file_set() {
     local option="${2#*.}"
     local value="$3"
 
-    section_values=$(conf_file_get_options "${conffile}" "${section}")
-    if [ $? -eq $TRUE ]; then
-        if [ $? -eq $TRUE ]; then
-            sed -i -e "/\[${section}]/,/^\[/ {
-                /^${option}=/ {
-                    # s#.*#${option}=${value}#
-                    c\
+    local section_exists=$(conf_file_get_sections "${conffile}" | grep -E "^${section}$" | wc -l)
+    if [ $section_exists -ne 0 ]; then
+            sed -i "/^\[${section}\]/,$ {
+                x; # hold
+                /^$/ { s#.*#${section}:0# } # hold buffer empty, set it to current section.
+
+                /^${section}:[01]$/ {
+                    # we are in the current section
+                    x; # pattern
+                    /^\[${section}\]/ { # current line in section header, skip it
+                        $ {  # already at end-of-file, 'set' could not have already occurred, force adding option line
+                            a\
 ${option}=${value}
-                };
-            };
-            " "${conffile}"
-        else
-            sed -i -e "/\[${section}]/,/^\[/ {
-                /\[${section}\]/n;
-                /^\[/ {
-                    i\
+                        }
+                        n;
+                    }
+                    x; # hold
+                    /^${section}:1$/ {  # 'set' already occured, skip
+                        x; # pattern
+                        n;
+                    }
+                    /^${section}:0$/ {  # 'set' still searching
+                        x; # pattern;
+                        /^${option}=/ {  # option found
+                            x; # hold
+                            s/:0$/:1/
+                            x; # pattern
+                            c\
 ${option}=${value}
-                };
-                $ {
-                    a\
+                            n;
+                        }
+                        /^\[/ {  # start of next section
+                            x; # hold
+                            s/:0$/:1/
+                            x; # pattern
+                            i\
 ${option}=${value}
+                            n;
+                        }
+                        $ {
+                            x; # hold
+                            s/:0$/:1/
+                            x; # pattern
+                            a\
+${option}=${value}
+                            n;
+                        }
+                    }
+                    #l;
+                    x; # hold
                 }
-            };
-            " "${conffile}"
-        fi
+
+                x;  # get back pattern buffer
+            }" "${conffile}"
     else
         echo -e "\n[${section}]\n${option}=${value}" >> "${conffile}"
     fi
@@ -638,27 +687,32 @@ cmd_internal() {
 
 cmd_config() {
 : <<HELP_CMD_CONFIG
-doh config [-l] name [value]
+doh config [name [value] | -u name | -l]
 
 Get and set odoo profile options
 
 options:
 
 -l            list all profile variables
+-u            unset the following config option
 HELP_CMD_CONFIG
     local listall="0"
+    local varunset="0"
 
     OPTIND=1
-    while getopts ":l" opt; do
+    while getopts ":lu" opt; do
         case $opt in
             l)
                 listall="1"
+                ;;
+            u)
+                varunset="1"
                 ;;
         esac
     done
     shift $(($OPTIND - 1))
 
-    if [ x"${listall}" != x"1" ] && [ $# -lt 1 ]; then
+    if [ x"${listall}" != x"1" ] && [ x"${varunset}" != x"1" ] && [ $# -lt 1 ]; then
         echo "Usage: doh config: missing argument -- NAME"
         cmd_help "config"
     fi
@@ -675,13 +729,15 @@ HELP_CMD_CONFIG
         for section in ${SECTIONS}; do
             VARS=$(conf_file_get_options "${DIR_ROOT}/odoo.profile" "${section}")
             IFS=$'\n'; while read -r var; do
+                [ x"${var}" = x"" ] && continue
                 opt_name="${var%%=*}"
                 opt_value="${var#*=}"
                 echo "${section}.${opt_name}=${opt_value}"
             done <<< "${VARS}"
             IFS="$OLDIFS"
         done
-
+    elif [ x"${varunset}" = x"1" ]; then
+        conf_file_unset "${DIR_ROOT}/odoo.profile" "$1"
     elif [ $# -ge 2 ]; then
         conf_file_set "${DIR_ROOT}/odoo.profile" "$1" "$2"
     else
