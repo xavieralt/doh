@@ -420,7 +420,7 @@ doh_update_section() {
     if [[ x"${section_type}" = x"git" ]]; then
 
         [ x"${section_repo_url}" = x"" ] && die "No repository url specified for section ${1}"
-        [ x"${section_branch}" = x"" ] && die "No branch specified for section ${1}"
+        section_branch="${section_branch:-master}"  # follow git default branch, i.e 'master'
 
         if ! helper_is_dir_repo "${section_dir}" "${section_type}" "${section_repo_url}"; then
             edebug "creating new empty repository"
@@ -447,7 +447,7 @@ doh_update_section() {
         fi
 
         erun git -C "${section_dir}" checkout -f . # remove local changes
-        erun git -C "${section_dir}" pull -f origin "${section_branch}"
+        erun git -C "${section_dir}" pull -f origin "${section_branch}" || die 'Unable to fetch git repository'
         erun git -C "${section_dir}" checkout -f "${section_branch}"
 
     elif [ x"${section_type}" = x"archive" ]; then
