@@ -381,7 +381,7 @@ doh_profile_load() {
         if [ x"${CONF_ADDONS_SUBDIR}" != x"" ]; then
             ADDONS_PATH="${ADDONS_PATH}/${CONF_ADDONS_SUBDIR}"
         fi
-        export DIR_ADDONS="${ADDONS_PATH}"
+        export DIR_ADDONS="${DIR_ROOT}/addons"
     fi
 
     DOH_PROFILE_LOADED="1"
