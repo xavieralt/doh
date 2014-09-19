@@ -6,6 +6,7 @@ DOH_VERSION="0.1"
 DOH_LOGFILE=/tmp/doh.log
 DOH_LOGLEVEL="${DOH_LOGLEVEL:-info}"
 DOH_PROFILE_LOADED="0"
+DOH_PARTS="main addons extra client"
 
 doh_setup_logging() {
 
@@ -487,7 +488,7 @@ doh_update_section() {
     local section_sparsecheckout=$(conf_env_get "${section}.sparse_checkout")
 
     if [[ x"${section_type}" = x"git" ]]; then
-
+        elog "updating ${section,,}"
         [ x"${section_repo_url}" = x"" ] && die "No repository url specified for section ${1}"
         section_branch="${section_branch:-master}"  # follow git default branch, i.e 'master'
 
@@ -927,10 +928,9 @@ HELP_CMD_INSTALL
     install_bootstrap_depends
 
     elog "fetching odoo from remote git repository (this can take some time...)"
-    doh_update_section "main"
-    doh_update_section "addons"
-    doh_update_section "extra"
-    doh_update_section "client"
+    for part in $DOH_PARTS; do
+        doh_update_section "${part}"
+    done
 
     elog "installing odoo dependencies (sudo)"
     doh_check_odoo_depends
@@ -963,10 +963,9 @@ HELP_CMD_UPGRADE
     doh_profile_update
     doh_check_dirs
 
-    doh_update_section "main"
-    doh_update_section "addons"
-    doh_update_section "extra"
-    doh_update_section "client"
+    for part in $DOH_PARTS; do
+        doh_update_section "${part}"
+    done
 
     if [ $# -gt 0 ]; then
         for db in $@; do
