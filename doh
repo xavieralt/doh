@@ -334,6 +334,7 @@ doh_profile_load() {
     export DIR_MAIN="${PWD}/main"
     export DIR_ADDONS="${PWD}/main/addons"
     export DIR_EXTRA="${PWD}/extra"
+    export DIR_CLIENT="${PWD}/client"
     export DIR_CONF="${PWD}/conf"
     export DIR_LOGS="${PWD}/logs"
     export DIR_RUN="${PWD}/run"
@@ -391,7 +392,7 @@ doh_check_dirs() {
     # check if required dirs exists
     doh_profile_load
 
-    for dir in DIR_ROOT DIR_MAIN DIR_ADDONS DIR_EXTRA DIR_LOGS DIR_RUN DIR_CONF; do
+    for dir in DIR_ROOT DIR_MAIN DIR_ADDONS DIR_EXTRA DIR_CLIENT DIR_LOGS DIR_RUN DIR_CONF; do
         if [ ! -d "${!dir}" ]; then
             elog "creating directory ${!dir}"
             mkdir -p "${!dir}"
@@ -404,7 +405,8 @@ doh_update_section() {
     # whitelist allowed sections
     doh_profile_load
 
-    ([ x"${1,,}" != x"main" ] && [ x"${1,,}" != x"addons" ] && [ x"${1,,}" != x"extra" ]) && die 'Invalid section ${section}'
+    ([ x"${1,,}" != x"main" ] && [ x"${1,,}" != x"addons" ] \
+      && [ x"${1,,}" != x"extra" ] && [ x"${1,,}" != x"client" ]) && die "Invalid section ${section}"
     [ x"$(conf_env_get "${1}")" != x"1" ] && return  # section is not defined
 
     local section="${1^^}"
@@ -531,6 +533,21 @@ doh_run_server() {
     else
         die "No known way to start server for version ${v}"
     fi
+}
+
+doh_run_client_gtk() {
+    doh_profile_load
+
+    if [ x"${CONF_CLIENT}" != x"1" ]; then
+        die "Unable to start gtk client, no 'client' section defined in odoo.profile"
+    fi
+
+    local v="${CONF_PROFILE_VERSION:-8.0}"
+    if [ x"${v}" != x"6.0" ] && [ x"${v}" != x"6.1" ]; then
+        die 'The gtk client is not support for you odoo version'
+    fi
+
+    erun "${DIR_CLIENT}/bin/openerp-client.py" "$@"
 }
 
 doh_svc_is_running() {
@@ -837,6 +854,7 @@ HELP_CMD_INSTALL
     doh_update_section "main"
     doh_update_section "addons"
     doh_update_section "extra"
+    doh_update_section "client"
 
     elog "installing odoo dependencies (sudo)"
     doh_check_odoo_depends
@@ -872,6 +890,7 @@ HELP_CMD_UPGRADE
     doh_update_section "main"
     doh_update_section "addons"
     doh_update_section "extra"
+    doh_update_section "client"
 
     if [ $# -gt 0 ]; then
         for db in $@; do
@@ -968,6 +987,16 @@ HELP_CMD_UPGRADE_DB
         erunquiet doh_run_server -d "${DB}" --stop-after-init -u all || die 'Unable to upgrade database'
     fi
     elog "database ${DB} upgraded successfully"
+}
+
+cmd_client() {
+: <<HELP_CMD_CLIENT
+doh client
+
+HELP_CMD_CLIENT
+
+    doh_profile_load
+    doh_run_client_gtk "$@"
 }
 
 cmd_start() {
