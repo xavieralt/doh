@@ -47,7 +47,8 @@ erun() {
         quiet=1; shift;
     fi
     edebug "will run: $@"
-    "$@" 2>>${DOH_LOGFILE} | tee -a ${DOH_LOGFILE}
+    "$@" >>${DOH_LOGFILE} 2>&1
+    return $?
 }
 
 
