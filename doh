@@ -129,7 +129,7 @@ conf_file_get_options() {
     local conffile="$1"
     local section="$2"
     if (grep -E "^\[${section}\]$" "${conffile}" >/dev/null); then
-        sed -n "/^\[${section}\]/,$ { /^\[/{s/^\[\(.*\)\]$/\1/; x; d}; x; /^${section}$/!{x; d; n}; x; /^#/d; p;}" "${conffile}"
+        sed -n "/^\[${section}\]/,$ { /^\[/{s/^\[\(.*\)\]$/\1/; x; d}; x; /^${section}$/!{x; d; n}; x; /^#/d; s/[ \\t]*$//; p;}" "${conffile}"
         return $TRUE
     else
         return $FALSE
