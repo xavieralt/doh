@@ -339,12 +339,35 @@ db_config_local_server() {
     fi
 }
 
+doh_generate_server_config_file() {
+    doh_profile_load
+
+    RUNAS="$USER"
+    ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
+    # ODOO_ADDONS_PATH="${DIR_ADDONS},${DIR_EXTRA}"
+    ODOO_ADDONS_PATH="${DOH_ADDONS_PATH}"
+
+    elog "Generating Odoo config file"
+    cat <<EOF | erunquiet tee "${ODOO_CONF_FILE}"
+[addons]
+[options]
+; This is the password that allows database operations:
+; admin_passwd = admin
+db_host = ${CONF_DB_HOST:-False}
+db_port = ${CONF_DB_PORT:-False}
+db_user = ${CONF_DB_USER}
+db_password = ${CONF_DB_PASS:-False}
+addons_path = ${ODOO_ADDONS_PATH}
+EOF
+    elog "Fixing permissions for Odoo config file"
+    erunquiet sudo chmod 640 "${ODOO_CONF_FILE}"
+    erunquiet sudo chown "${RUNAS}:adm" "${ODOO_CONF_FILE}"
+}
+
 doh_config_init() {
     doh_profile_load
 
 
-    ODOO_ADDONS_PATH="${DIR_ADDONS},${DIR_EXTRA}"
-    ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
     ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
     RUNAS="$USER"
 
@@ -353,34 +376,7 @@ doh_config_init() {
         TMPL_INIT_FILE="${DIR_MAIN}/debian/openerp-server.init"
     fi
 
-
-    elog "Generating Odoo init script"
-    sed \
-        -e "s#^DAEMON=.*\$#DAEMON=${DIR_MAIN}/openerp-server#" \
-        -e "s/^\\(NAME\\|DESC\\)=.*\$/\\1=${CONF_PROFILE_NAME}/" \
-        -e "s#^CONFIG=.*\$#CONFIG=${ODOO_CONF_FILE}#" \
-        -e "s#^LOGFILE=.*\$#LOGFILE=${ODOO_LOG_FILE}#" \
-        -e "s/^USER=.*\$/USER=${RUNAS}/" \
-        -e "s#--pidfile /var/run/#--pidfile ${DIR_RUN}/#" \
-        ${TMPL_INIT_FILE} | erunquiet sudo tee "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
-    erunquiet sudo chmod 755 "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
-
-    elog "Generating Odoo config file"
-    cat <<EOF | erunquiet tee "${ODOO_CONF_FILE}"
-[addons]
-[options]
-; This is the password that allows database operations:
-; admin_passwd = admin
-db_host = ${DB_HOST:-False}
-db_port = ${DB_PORT:-False}
-db_user = ${DB_USER}
-db_password = ${DB_PASS:-False}
-addons_path = ${ODOO_ADDONS_PATH}
-EOF
-    elog "Fixing permissions for Odoo config file"
-    erunquiet sudo chmod 640 "${ODOO_CONF_FILE}"
-    erunquiet sudo chown "${RUNAS}:adm" "${ODOO_CONF_FILE}"
-
+    doh_generate_server_config_file
 
     elog "Fixing permissions for Odoo log file"
     erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
@@ -455,6 +451,33 @@ doh_profile_load() {
         export DIR_ADDONS="${DIR_ROOT}/addons"
     fi
 
+    local ADDONS_PATH=""
+    for part in ADDONS EXTRA; do
+        local v="CONF_$part";
+        local d="DIR_$part";
+        local part_path="";
+
+        if [ x"${!v}" = x"1" ]; then
+            local vsub="${v}_SUBDIR"
+            if [ x"${!vsub}" != x"" ]; then
+                part_path="${!d}/${!vsub}"
+            else
+                part_path="${!d}"
+            fi
+        elif [ x"${part}" = x"ADDONS" ]; then
+            # addons part, but specific section
+            part_path="${DIR_MAIN}/addons"
+        fi
+
+        if [ x"${part_path}" != x"" ]; then
+            if [ x"${ADDONS_PATH}" != x"" ]; then
+                ADDONS_PATH="${ADDONS_PATH},"
+            fi
+            ADDONS_PATH="${ADDONS_PATH}${part_path}"
+        fi
+    done
+    export DOH_ADDONS_PATH="${ADDONS_PATH}"
+
     DOH_PROFILE_LOADED="1"
 }
 
@@ -524,7 +547,7 @@ doh_update_section() {
         elog "fetching odoo extra modules"
         local extra_tmp=`mktemp`
         local extra_tmpdir=`mktemp -d`
-        erunquiet wget -q -O "${extra_tmp}" "${CONF_EXTRA_URL}"
+        erun wget -O "${extra_tmp}" "${CONF_EXTRA_URL}"
         elog "extracting odoo extra modules"
         erunquiet 7z x -y "-o${extra_tmpdir}" "${extra_tmp}"
         rm -Rf "${section_dir}"
@@ -594,6 +617,11 @@ EOF
 
 doh_run_server() {
     doh_profile_load
+    doh_check_dirs
+
+    if [ ! -e "${DIR_CONF}/odoo-server.conf" ]; then
+        doh_generate_server_config_file
+    fi
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
     if [ x"${v}" = x"8.0" ] || [ x"${v}" = x"7.0" ] || [ x"${v}" = x"master" ]; then
@@ -983,7 +1011,7 @@ HELP_CMD_CREATE_DB
         echo "Usage: doh create-db: missing arguemnt -- NAME"
         cmd_help "create_db"
     fi
-    local createdb=$(db_get_server_local_cmd "dropdb")
+    local createdb=$(db_get_server_local_cmd "createdb")
     DB="$1"
 
     doh_profile_load
