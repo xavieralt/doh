@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DOH_VERSION="0.1"
+DOH_VERSION="0.2"
 
 # Setup output logging
 DOH_LOGFILE=/tmp/doh.log
@@ -1166,6 +1166,9 @@ case $CMD in
         (cat "${tmp_doh}" | sudo tee "$0" >/dev/null) || die 'Unable to update doh'
         sudo chmod 755 "$0"  # ensure script is executable
         exit 0
+        ;;
+    --version)
+        echo "doh v${DOH_VERSION}"
         ;;
     *)
         doh_setup_logging
