@@ -364,11 +364,11 @@ EOF
     erunquiet sudo chown "${RUNAS}:adm" "${ODOO_CONF_FILE}"
 }
 
-doh_config_init() {
+doh_generate_server_init_file() {
     doh_profile_load
 
-
     ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
+    ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
     RUNAS="$USER"
 
     TMPL_INIT_FILE="${DIR_MAIN}/debian/init"
@@ -376,7 +376,23 @@ doh_config_init() {
         TMPL_INIT_FILE="${DIR_MAIN}/debian/openerp-server.init"
     fi
 
+    elog "Updating Odoo init script"
+    sed \
+        -e "s#^DAEMON=.*\$#DAEMON=${DIR_MAIN}/openerp-server#" \
+        -e "s/^\\(NAME\\|DESC\\)=.*\$/\\1=${CONF_PROFILE_NAME}/" \
+        -e "s#^CONFIG=.*\$#CONFIG=${ODOO_CONF_FILE}#" \
+        -e "s#^LOGFILE=.*\$#LOGFILE=${ODOO_LOG_FILE}#" \
+        -e "s/^USER=.*\$/USER=${RUNAS}/" \
+        -e "s#--pidfile /var/run/#--pidfile ${DIR_RUN}/#" \
+        ${TMPL_INIT_FILE} | erunquiet sudo tee "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
+    erunquiet sudo chmod 755 "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
+}
+
+doh_config_init() {
+    doh_profile_load
+
     doh_generate_server_config_file
+    doh_generate_server_init_file
 
     elog "Fixing permissions for Odoo log file"
     erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
