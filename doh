@@ -635,7 +635,13 @@ doh_check_dirs() {
     # check if required dirs exists
     doh_profile_load
 
-    for dir in DIR_ROOT DIR_MAIN DIR_ADDONS DIR_EXTRA DIR_CLIENT DIR_LOGS DIR_RUN DIR_CONF; do
+    local BASE_DIRS="DIR_ROOT DIR_MAIN DIR_ADDONS DIR_EXTRA DIR_LOGS DIR_RUN DIR_CONF"
+    local V="${CONF_PROFILE_VERSION:-8.0}"
+    if [ x"${V}" = x"6.0" ] || [ x"${V}" = x"6.1" ]; then
+        BASE_DIRS="$BASE_DIRS DIR_CLIENT"
+    fi
+
+    for dir in $BASE_DIRS; do
         if [ ! -d "${!dir}" ]; then
             elog "creating directory ${!dir}"
             mkdir -p "${!dir}"
