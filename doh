@@ -381,6 +381,21 @@ doh_check_odoo_depends() {
     erunquiet sudo apt-get -y --no-install-recommends install ${DEPENDS}
 }
 
+doh_git_ssh_handler() {
+    local profile=$(doh_profile_find "$PWD")
+    local profile_root_dir=$(dirname "${profile}")
+    local profile_conf_dir="${profile_root_dir}/conf"
+
+    local deploy_key_url=$(conf_file_get "${profile}" "profile.deploy_key")
+    local deploy_key_file="${profile_conf_dir}/deploy.key"
+
+    local SSH_EXTRA_ARGS=""
+    if [ x"${deploy_key_url}" != x"" ] && [ -f "${deploy_key_file}" ]; then
+        SSH_EXTRA_ARGS="-i ${deploy_key_file}"
+    fi
+    ssh $SSH_EXTRA_ARGS "$@"
+}
+
 doh_fetch_file() {
     # $1: URL, "$2": output file
     gitlab_url_match='^((http)[s]?://([^/]+)[/]?)((.*)/snippets/([0-9]).*)$'
@@ -541,6 +556,18 @@ py_json_get_value() {
     python -c "import sys,json;obj=json.load(sys.stdin);print(obj.get('$1'))"
 }
 
+doh_profile_find() {
+    SEARCH_PWD="${1:-$PWD}"
+    while [ x"$SEARCH_PWD" != x"/" ]; do
+        if [ -f "${SEARCH_PWD}/odoo.profile" ]; then
+            echo "${SEARCH_PWD}/odoo.profile";
+            return $TRUE
+        fi
+        SEARCH_PWD=$(dirname "$SEARCH_PWD")
+    done
+    return $FALSE
+}
+
 doh_profile_load() {
     if [ x"${DOH_PROFILE_LOADED}" = x"1" ]; then
         return
@@ -628,6 +655,12 @@ doh_profile_load() {
     done
     export DOH_ADDONS_PATH="${ADDONS_PATH}"
 
+    # fetch remote deploy-key if none local
+    if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ] && [ ! -e "${DIR_CONF}/deploy.key" ]; then
+        doh_fetch_file "${CONF_PROFILE_DEPLOY_KEY}" "${DIR_CONF}/deploy.key"
+        chmod 0400 "${DIR_CONF}/deploy.key"
+    fi
+
     DOH_PROFILE_LOADED="1"
 }
 
@@ -671,6 +704,8 @@ doh_update_section() {
         [ x"${section_repo_url}" = x"" ] && die "No repository url specified for section ${1}"
         section_branch="${section_branch:-master}"  # follow git default branch, i.e 'master'
 
+        export GIT_SSH="$0"
+
         if ! helper_is_dir_repo "${section_dir}" "${section_type}" "${section_repo_url}"; then
             edebug "creating new empty repository"
             erun rm -Rf -- "${section_dir}"
@@ -696,8 +731,10 @@ doh_update_section() {
         fi
 
         erun git -C "${section_dir}" checkout -f . # remove local changes
-        erun git -C "${section_dir}" pull -f origin "${section_branch}" || die 'Unable to fetch git repository'
+        erun --show git -C "${section_dir}" pull -f origin "${section_branch}" || die 'Unable to fetch git repository'
         erun git -C "${section_dir}" checkout -f "${section_branch}"
+
+        unset GIT_SSH
 
     elif [ x"${section_type}" = x"archive" ]; then
         elog "fetching odoo extra modules"
@@ -1294,6 +1331,11 @@ HELP_CMD_STOP
     doh_svc_stop
 }
 
+if [ x"${GIT_INTERNAL_GETTEXT_SH_SCHEME}" != x"" ] && [ x"${GIT_SSH}" = x"$0" ]; then
+    # special case when calling our-self as GIT_SSH handler
+    doh_git_ssh_handler "$@";
+    exit 0;
+fi
 
 CMD="$1"; shift;
 case $CMD in
