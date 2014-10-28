@@ -660,14 +660,16 @@ doh_profile_load() {
     done
     export DOH_ADDONS_PATH="${ADDONS_PATH}"
 
+    DOH_PROFILE_LOADED="1"
+
     # fetch remote deploy-key if none local
     if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ] && [ ! -e "${DIR_CONF}/deploy.key" ]; then
         doh_check_dirs "DIR_CONF"
+        elog "fetching profile deploy-key"
         doh_fetch_file "${CONF_PROFILE_DEPLOY_KEY}" "${DIR_CONF}/deploy.key"
         chmod 0400 "${DIR_CONF}/deploy.key"
     fi
 
-    DOH_PROFILE_LOADED="1"
 }
 
 doh_check_dirs() {
