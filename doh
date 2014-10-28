@@ -8,6 +8,12 @@ DOH_LOGLEVEL="${DOH_LOGLEVEL:-info}"
 DOH_PROFILE_LOADED="0"
 DOH_PARTS="main addons extra client"
 
+# HELPERS GLOBALS
+declare -A GITLAB_CACHED_AUTH_TOKENS
+declare -A GITLAB_CACHED_AUTH_USERS
+declare -A GITLAB_CACHED_AUTH_PASSWD
+declare GITLAB_API_RESULT
+
 doh_setup_logging() {
 
 exec 6>&1
@@ -243,6 +249,94 @@ ${option}=${value}
     fi
 }
 
+gitlab_cache_auth_token() {
+    # $1: gitlab url
+    if [ x"${GITLAB_CACHED_AUTH_TOKENS[$1]}" = x"" ]; then
+        # ask user about user/password
+        local gitlab_username
+        local gitlab_password
+        while true; do
+            read -p "Please enter gitlab username: " REPLY
+            if [ x"${REPLY}" != x"" ]; then
+                gitlab_username="${REPLY}"
+            fi
+            if [ x"${gitlab_username}" != x"" ]; then
+                break
+            fi
+        done
+        while true; do
+            read -s -p "Pleaser enter gitlab password: " REPLY
+            if [ x"${REPLY}" != x"" ]; then
+                gitlab_password="${REPLY}"
+            fi
+            if [ x"${gitlab_password}" != x"" ]; then
+                break;
+            fi
+        done
+        echo "" >&2  # force empty line after password no-echo
+        local session_url="$1/api/v3/session"
+        local session=$(curl -f -s "${session_url}" --data "login=${gitlab_username}&password=${gitlab_password}")
+        if [ x"${session}" = x"" ]; then
+            eerror 'Unable to authenticate to gitlab (wrong password?)'
+            return $FALSE
+        fi
+        local private_token=$(echo "${session}" | py_json_get_value "private_token")
+        if [ x"${private_token}" = x"" ]; then
+            eerror 'Error unable to get session authentication token'
+            return $FALSE
+        fi
+        local session_username=$(echo "${session}" | py_json_get_value "username")
+        if [ x"${session_username}" = x"" ]; then
+            eerror 'Error unable to get session username'
+            return $FALSE
+        fi
+        GITLAB_CACHED_AUTH_TOKENS[$1]="${private_token}"
+        GITLAB_CACHED_AUTH_USERS[$1]="${session_username}"
+        GITLAB_CACHED_AUTH_PASSWD[$1]="${gitlab_password}"
+    fi
+    return $TRUE
+}
+
+gitlab_extract_baseurl() {
+    gitlab_host_url_match='^((http)[s]?://([^/]+))[/]?.*$'
+    if [[ "$1" =~ $gitlab_host_url_match ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return $TRUE
+    else
+        return $FALSE
+    fi
+}
+
+gitlab_identify_site() {
+    gitlab_url=$(gitlab_extract_baseurl "$1") || return $FALSE
+    session_url="${gitlab_url}/api/v3/session"
+    session_url_status=$(wget -O- -S -q "${session_url}" 2>&1 | sed -n '/\s*HTTP/{s#\s*HTTP\/.\.. \([0-9]*\) .*#\1#; p; q};')
+    if [ x"$session_url_status" = x"405" ]; then
+        return $TRUE
+    else
+        return $FALSE
+    fi
+}
+
+gitlab_api_query() {
+    # $1: gitlab url
+    # exact host url
+    gitlab_url=$(gitlab_extract_baseurl "$1")
+    if [ $? -ne 0 ]; then
+        die "Unable to extract Gitlab base url from $1"
+    fi
+
+    gitlab_cache_auth_token "${gitlab_url}" || die "Unable to get authentication token"
+    auth_token="${GITLAB_CACHED_AUTH_TOKENS[${gitlab_url}]}"
+
+    GITLAB_API_RESULT=$(wget -q -O- --header "PRIVATE-TOKEN: ${auth_token}" "$1")
+    if [ $? -eq 0 ]; then
+        return $TRUE
+    else
+        return $FALSE
+    fi
+}
+
 
 assert_in() {
     local r=$FALSE
@@ -404,6 +498,10 @@ doh_config_init() {
         elog "Adding Odoo '${CONF_PROFILE_NAME}' to autostart"
         erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
     fi
+}
+
+py_json_get_value() {
+    python -c "import sys,json;obj=json.load(sys.stdin);print(obj.get('$1'))"
 }
 
 doh_profile_load() {
