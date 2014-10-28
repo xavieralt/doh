@@ -273,7 +273,7 @@ gitlab_cache_auth_token() {
             fi
         done
         while true; do
-            read -s -p "Pleaser enter gitlab password: " REPLY
+            read -s -p "Please enter gitlab password: " REPLY
             if [ x"${REPLY}" != x"" ]; then
                 gitlab_password="${REPLY}"
             fi
@@ -900,7 +900,11 @@ doh_svc_restart() {
 
 cmd_help() {
 : <<HELP_CMD_HELP
-Usage: doh CMD [OPTS...]
+Usage: doh [OPTS | COMMAND] [COMMANDS OPTS...]
+
+Availables standalone options
+  --self-upgrade    self-update doh to latest version
+  --version         display doh version
 
 Available commands
   install    install and setup a new odoo instance
@@ -913,7 +917,7 @@ Available commands
   stop       stop odoo service
   help       show this help message
 
-Use "odoo-helper help CMD" for detail about a specific command
+Use "doh help CMD" for detail about a specific command
 HELP_CMD_HELP
 
     CMD=${1:-help}
@@ -1351,7 +1355,7 @@ fi
 
 CMD="$1"; shift;
 case $CMD in
-    internal-self-upgrade)
+    internal-self-upgrade|--self-upgrade)
         # TOOD: add self-upgrading function
         elog "Going to upgrade doh (path: $0) with remote version, press ENTER to continue or Ctrl-C to cancel"
         read ok
