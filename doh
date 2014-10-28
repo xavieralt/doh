@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DOH_VERSION="0.2"
+DOH_VERSION="0.3"
 
 # Setup output logging
 DOH_LOGFILE=/tmp/doh.log
