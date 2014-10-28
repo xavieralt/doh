@@ -63,6 +63,9 @@ erun() {
     return $?
 }
 
+urlencode() {
+    sed 's/%/%25/g;s/ /%20/g;s/ /%09/g;s/!/%21/g;s/"/%22/g;s/#/%23/g;s/\$/%24/g;s/\&/%26/g;s/'\''/%27/g;s/(/%28/g;s/)/%29/g;s/\*/%2a/g;s/+/%2b/g;s/,/%2c/g;s/-/%2d/g;s/\./%2e/g;s/\//%2f/g;s/:/%3a/g;s/;/%3b/g;s//%3e/g;s/?/%3f/g;s/@/%40/g;s/\[/%5b/g;s/\\/%5c/g;s/\]/%5d/g;s/\^/%5e/g;s/_/%5f/g;s/`/%60/g;s/{/%7b/g;s/|/%7c/g;s/}/%7d/g;s/~/%7e/g;s/      /%09/g;'
+}
 
 elogmsg() {
     loglevel="$1"; shift;
@@ -280,6 +283,8 @@ gitlab_cache_auth_token() {
         done
         echo "" >&2  # force empty line after password no-echo
         local session_url="$1/api/v3/session"
+        gitlab_username=$(echo "${gitlab_username}" | urlencode)
+        gitlab_password=$(echo "${gitlab_password}" | urlencode)
         local session=$(curl -f -s "${session_url}" --data "login=${gitlab_username}&password=${gitlab_password}")
         if [ x"${session}" = x"" ]; then
             eerror 'Unable to authenticate to gitlab (wrong password?)'
