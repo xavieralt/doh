@@ -381,6 +381,38 @@ doh_check_odoo_depends() {
     erunquiet sudo apt-get -y --no-install-recommends install ${DEPENDS}
 }
 
+doh_fetch_file() {
+    # $1: URL, "$2": output file
+    gitlab_url_match='^((http)[s]?://([^/]+)[/]?)((.*)/snippets/([0-9]).*)$'
+    if [[ "${1}" =~ ${gitlab_url_match} ]]; then
+        edebug "loading remote gitlab snippet from: ${1}"
+        profile_baseloc="${BASH_REMATCH[1]}"
+        gitlab_project_name="${BASH_REMATCH[-2]}"
+        gitlab_snippet_id="${BASH_REMATCH[-1]}"
+
+        local api_url="${profile_baseloc}api/v3"
+
+        project_name_urlencoded=$(echo "${gitlab_project_name}" | sed 's#/#%2F#')
+
+        gitlab_api_query "${api_url}/projects/${project_name_urlencoded}" \
+            || die "Unable to get project \"${gitlab_project_name}\" information"
+
+        project_id=$(echo "${GITLAB_API_RESULT}" | py_json_get_value "id")
+        [ x"${project_id}" = x"" ] && die "Unable to get project Id"
+
+        gitlab_api_query "${api_url}/projects/${project_id}/snippets/${gitlab_snippet_id}/raw" \
+            || die "Unable to get snippet content (or snippet is empty)"
+        echo "${GITLAB_API_RESULT}" | sed 's/\r$//'> "${2}"
+        return $TRUE
+    elif [[ "${1}" =~ ^(http|ftp)[s]?://.* ]]; then
+        edebug "loading remote file from: ${1}"
+        # wget + load file
+        wget -q -O "${2}" "${1}" || die 'Unable to fetch remote file'
+        return $TRUE
+    fi
+    return $FALSE
+}
+
 install_postgresql_server() {
     erunquiet sudo apt-get -y --no-install-recommends install postgresql
 }
@@ -526,11 +558,10 @@ doh_profile_load() {
 
     local profile="${1:-odoo.profile}"
     if [[ "${profile}" =~ ^(http|ftp)[s]?://.* ]]; then
-        edebug "loading remote profile from: ${profile}"
-        # wget + load file
-        rm -f /tmp/odoo.profile
-        wget -q -O "${DIR_ROOT}/odoo.profile" "${profile}" || die 'Unable to fetch remote profile'
+        local profile_url="${profile}"
         profile="${DIR_ROOT}/odoo.profile"
+        doh_fetch_file "${profile_url}" "${profile}" || die 'Unable to fetch remote profile'
+
     elif [ -f "${profile}" ]; then
         if [ ! "${profile}" -ef "${DIR_ROOT}/odoo.profile" ]; then
             cp "${profile}" "${DIR_ROOT}/odoo.profile"
