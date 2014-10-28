@@ -662,6 +662,7 @@ doh_profile_load() {
 
     # fetch remote deploy-key if none local
     if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ] && [ ! -e "${DIR_CONF}/deploy.key" ]; then
+        doh_check_dirs "DIR_CONF"
         doh_fetch_file "${CONF_PROFILE_DEPLOY_KEY}" "${DIR_CONF}/deploy.key"
         chmod 0400 "${DIR_CONF}/deploy.key"
     fi
@@ -673,10 +674,14 @@ doh_check_dirs() {
     # check if required dirs exists
     doh_profile_load
 
-    local BASE_DIRS="DIR_ROOT DIR_MAIN DIR_ADDONS DIR_EXTRA DIR_LOGS DIR_RUN DIR_CONF"
-    local V="${CONF_PROFILE_VERSION:-8.0}"
-    if [ x"${V}" = x"6.0" ] || [ x"${V}" = x"6.1" ]; then
-        BASE_DIRS="$BASE_DIRS DIR_CLIENT"
+    if [ x"$1" != x"" ]; then
+        local BASE_DIRS="$1"
+    else
+        local BASE_DIRS="DIR_ROOT DIR_MAIN DIR_ADDONS DIR_EXTRA DIR_LOGS DIR_RUN DIR_CONF"
+        local V="${CONF_PROFILE_VERSION:-8.0}"
+        if [ x"${V}" = x"6.0" ] || [ x"${V}" = x"6.1" ]; then
+            BASE_DIRS="$BASE_DIRS DIR_CLIENT"
+        fi
     fi
 
     for dir in $BASE_DIRS; do
