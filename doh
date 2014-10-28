@@ -54,7 +54,12 @@ erun() {
         quiet=1; shift;
     fi
     edebug "will run: $@"
-    "$@" >>${DOH_LOGFILE} 2>&1
+    if [ x"$1" = x"--show" ]; then
+        shift;
+        "$@" >&6 2>&7
+    else
+        "$@" >>${DOH_LOGFILE} 2>&1
+    fi
     return $?
 }
 
