@@ -579,24 +579,6 @@ doh_generate_server_init_file() {
     erunquiet sudo chmod 755 "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
 }
 
-doh_config_init() {
-    doh_profile_load
-
-    doh_generate_server_config_file
-    doh_generate_server_init_file
-
-    elog "fixing permissions for odoo log file"
-    erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
-    erunquiet sudo touch "${ODOO_LOG_FILE}"
-    erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
-    erunquiet sudo chown "${RUNAS}:adm" "${ODOO_LOG_FILE}"
-
-    if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
-        elog "adding odoo '${CONF_PROFILE_NAME}' to autostart"
-        erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
-    fi
-}
-
 py_json_get_value() {
     parse_json="${2:-print(obj.get('$1'))}"
     python -c "import sys,json;obj=json.load(sys.stdin);${parse_json}"
@@ -711,6 +693,36 @@ doh_profile_load() {
         chmod 0400 "${DIR_CONF}/deploy.key"
     fi
 
+}
+
+doh_reconfigure() {
+    doh_profile_load
+    doh_check_dirs
+
+    elog "installing odoo dependencies (sudo)"
+    doh_check_odoo_depends
+
+    # fetch remote deploy-key if none local
+    if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ]; then
+        doh_check_dirs "DIR_CONF"
+        elog "fetching profile deploy-key"
+        doh_fetch_file "${CONF_PROFILE_DEPLOY_KEY}" "${DIR_CONF}/deploy.key"
+        chmod 0400 "${DIR_CONF}/deploy.key"
+    fi
+
+    doh_generate_server_config_file
+    doh_generate_server_init_file
+
+    elog "fixing permissions for odoo log file"
+    erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
+    erunquiet sudo touch "${ODOO_LOG_FILE}"
+    erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
+    erunquiet sudo chown "${RUNAS}:adm" "${ODOO_LOG_FILE}"
+
+    if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
+        elog "adding odoo '${CONF_PROFILE_NAME}' to autostart"
+        erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
+    fi
 }
 
 doh_check_dirs() {
@@ -1210,9 +1222,6 @@ HELP_CMD_INSTALL
         doh_update_section "${part}"
     done
 
-    elog "installing odoo dependencies (sudo)"
-    doh_check_odoo_depends
-
     if [ x"$local_database" = x"true" ]; then
         elog "installing postgresql server (sudo)"
         install_postgresql_server
@@ -1220,7 +1229,7 @@ HELP_CMD_INSTALL
         db_config_local_server
     fi
 
-    doh_config_init
+    doh_reconfigure
 
     if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
         elog "starting odoo (sudo)"
