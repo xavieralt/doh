@@ -403,7 +403,11 @@ doh_git_ssh_handler() {
 
 doh_fetch_file() {
     # $1: URL, "$2": output file
-    gitlab_url_match='^((http)[s]?://([^/]+)[/]?)((.*)/snippets/([0-9]).*)$'
+    if [ $# -lt 2 ]; then
+        die "Wrong number of parameters for 'doh_fetch_file'"
+    fi
+
+    gitlab_url_match='^((http)[s]?://([^/]+)[/]?)((.*)/snippets/([0-9]|[^/]*).*)$'
     if [[ "${1}" =~ ${gitlab_url_match} ]]; then
         edebug "loading remote gitlab snippet from: ${1}"
         profile_baseloc="${BASH_REMATCH[1]}"
@@ -412,14 +416,22 @@ doh_fetch_file() {
 
         local api_url="${profile_baseloc}api/v3"
 
-        project_name_urlencoded=$(echo "${gitlab_project_name}" | sed 's#/#%2F#')
+        project_name_urlencoded=$(echo "${gitlab_project_name}" | urlencode)
 
+        edebug "querying project id for project name '${gitlab_project_name}'"
         gitlab_api_query "${api_url}/projects/${project_name_urlencoded}" \
             || die "Unable to get project \"${gitlab_project_name}\" information"
-
         project_id=$(echo "${GITLAB_API_RESULT}" | py_json_get_value "id")
         [ x"${project_id}" = x"" ] && die "Unable to get project Id"
 
+        if ! [[ "${gitlab_snippet_id}" =~ ^[0-9]*$ ]]; then
+            edebug "querying snippet id from snipped name '${gitlab_snippet_id}'"
+            gitlab_api_query "${api_url}/projects/${project_id}/snippets"
+            gitlab_snippet_id=$(echo "${GITLAB_API_RESULT}" \
+                | py_json_get_value "" "m=[v['id'] for v in obj if v['file_name'] == '${gitlab_snippet_id}' or v['title'] == '${gitlab_snippet_id}'];print(m[0] if m else '')")
+        fi
+
+        edebug "fetching snippet id ${gitlab_snippet_id}"
         gitlab_api_query "${api_url}/projects/${project_id}/snippets/${gitlab_snippet_id}/raw" \
             || die "Unable to get snippet content (or snippet is empty)"
         echo "${GITLAB_API_RESULT}" | sed 's/\r$//'> "${2}"
@@ -558,7 +570,8 @@ doh_config_init() {
 }
 
 py_json_get_value() {
-    python -c "import sys,json;obj=json.load(sys.stdin);print(obj.get('$1'))"
+    parse_json="${2:-print(obj.get('$1'))}"
+    python -c "import sys,json;obj=json.load(sys.stdin);${parse_json}"
 }
 
 doh_profile_find() {
