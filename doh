@@ -530,7 +530,6 @@ db_config_local_server() {
 doh_generate_server_config_file() {
     doh_profile_load
 
-    RUNAS="$USER"
     ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
     # ODOO_ADDONS_PATH="${DIR_ADDONS},${DIR_EXTRA}"
     ODOO_ADDONS_PATH="${DOH_ADDONS_PATH}"
@@ -549,7 +548,7 @@ addons_path = ${ODOO_ADDONS_PATH}
 EOF
     elog "fixing permissions for odoo config file"
     erunquiet sudo chmod 640 "${ODOO_CONF_FILE}"
-    erunquiet sudo chown "${RUNAS}:adm" "${ODOO_CONF_FILE}"
+    erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_CONF_FILE}"
 }
 
 doh_generate_server_init_file() {
@@ -557,7 +556,6 @@ doh_generate_server_init_file() {
 
     ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
     ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
-    RUNAS="$USER"
 
     if [[ "${CONF_PROFILE_VERSION:-8.0}" =~ ^(6.0)$ ]]; then
         TMPL_INIT_FILE="${DIR_MAIN}/debian/openerp-server.init"
@@ -573,7 +571,7 @@ doh_generate_server_init_file() {
         -e "s/^\\(NAME\\|DESC\\)=.*\$/\\1=${CONF_PROFILE_NAME}/" \
         -e "s#^CONFIG=.*\$#CONFIG=${ODOO_CONF_FILE}#" \
         -e "s#^LOGFILE=.*\$#LOGFILE=${ODOO_LOG_FILE}#" \
-        -e "s/^USER=.*\$/USER=${RUNAS}/" \
+        -e "s/^USER=.*\$/USER=${CONF_PROFILE_RUNAS}/" \
         -e "s#--pidfile /var/run/#--pidfile ${DIR_RUN}/#" \
         ${TMPL_INIT_FILE} | erunquiet sudo tee "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
     erunquiet sudo chmod 755 "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
@@ -683,16 +681,12 @@ doh_profile_load() {
     done
     export DOH_ADDONS_PATH="${ADDONS_PATH}"
 
-    DOH_PROFILE_LOADED="1"
-
-    # fetch remote deploy-key if none local
-    if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ] && [ ! -e "${DIR_CONF}/deploy.key" ]; then
-        doh_check_dirs "DIR_CONF"
-        elog "fetching profile deploy-key"
-        doh_fetch_file "${CONF_PROFILE_DEPLOY_KEY}" "${DIR_CONF}/deploy.key"
-        chmod 0400 "${DIR_CONF}/deploy.key"
+    export CONF_PROFILE_RUNAS="${CONF_PROFILE_RUNAS:-${USER}}"
+    if [ x"${CONF_PROFILE_RUNAS}" != x"$USER" ]; then
+        die "error: please re-run this command as '${CONF_PROFILE_RUNAS}' user (this is enforced by current profile)"
     fi
 
+    DOH_PROFILE_LOADED="1"
 }
 
 doh_reconfigure() {
@@ -717,7 +711,7 @@ doh_reconfigure() {
     erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
     erunquiet sudo touch "${ODOO_LOG_FILE}"
     erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
-    erunquiet sudo chown "${RUNAS}:adm" "${ODOO_LOG_FILE}"
+    erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_LOG_FILE}"
 
     if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
         elog "adding odoo '${CONF_PROFILE_NAME}' to autostart"
