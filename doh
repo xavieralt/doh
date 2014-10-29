@@ -330,7 +330,7 @@ gitlab_identify_site() {
 
 gitlab_api_query() {
     # $1: gitlab url
-    # exact host url
+    # $2: wget extra args
     gitlab_url=$(gitlab_extract_baseurl "$1")
     if [ $? -ne 0 ]; then
         die "Unable to extract Gitlab base url from $1"
@@ -339,7 +339,7 @@ gitlab_api_query() {
     gitlab_cache_auth_token "${gitlab_url}" || die "Unable to get authentication token"
     auth_token="${GITLAB_CACHED_AUTH_TOKENS[${gitlab_url}]}"
 
-    GITLAB_API_RESULT=$(wget -q -O- --header "PRIVATE-TOKEN: ${auth_token}" "$1")
+    GITLAB_API_RESULT=$(wget -q -O- --header "PRIVATE-TOKEN: ${auth_token}" "$1" $2)
     if [ $? -eq 0 ]; then
         return $TRUE
     else
