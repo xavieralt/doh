@@ -559,9 +559,12 @@ doh_generate_server_init_file() {
     ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
     RUNAS="$USER"
 
-    TMPL_INIT_FILE="${DIR_MAIN}/debian/init"
-    if [ x"${CONF_PROFILE_VERSION:-8.0}" = x"6.0" ]; then
+    if [[ "${CONF_PROFILE_VERSION:-8.0}" =~ ^(6.0)$ ]]; then
         TMPL_INIT_FILE="${DIR_MAIN}/debian/openerp-server.init"
+    elif [[ "${CONF_PROFILE_VERSION:-8.0}" =~ ^(6.1|7.0)$ ]]; then
+        TMPL_INIT_FILE="${DIR_MAIN}/debian/openerp.init"
+    else # 8.0 and later
+        TMPL_INIT_FILE="${DIR_MAIN}/debian/init"
     fi
 
     elog "Updating Odoo init script"
