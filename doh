@@ -716,8 +716,9 @@ doh_reconfigure() {
     if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ]; then
         doh_check_dirs "DIR_CONF"
         elog "fetching profile deploy-key"
+        touch "${DIR_CONF}/deploy.key"
+        chmod 0600 "${DIR_CONF}/deploy.key"
         doh_fetch_file "${CONF_PROFILE_DEPLOY_KEY}" "${DIR_CONF}/deploy.key"
-        chmod 0400 "${DIR_CONF}/deploy.key"
     fi
 
     doh_generate_server_config_file
