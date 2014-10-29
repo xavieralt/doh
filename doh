@@ -1138,6 +1138,8 @@ name=${n_profile_name}
 version=${n_profile_version}
 autostart=${n_profile_autostart}
 url=${n_profile_update_url}
+#runas=
+#deploy_key=
 
 [main]
 repo=${n_main_repo}
@@ -1147,6 +1149,7 @@ patchset=
 # [extra]
 # repo=
 # url=
+# patchset=
 
 # [db]
 # host=
@@ -1155,6 +1158,9 @@ patchset=
 # pass=
 # init_modules_on_create=base
 # init_extra_args=
+#
+# [server]
+# xmlrpc_port=
 
 TMPL_ODOO_PROFILE
 }
