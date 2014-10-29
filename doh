@@ -546,6 +546,19 @@ db_user = ${CONF_DB_USER}
 db_password = ${CONF_DB_PASS:-False}
 addons_path = ${ODOO_ADDONS_PATH}
 EOF
+
+    VARS=$(conf_file_get_options "${DIR_ROOT}/odoo.profile" "server")
+    if [ x"${VARS}" != x"" ]; then
+        elog "merging custom odoo config value from profile"
+        OLDIFS="${IFS}#"
+        IFS=$'\n'; while read -r var; do
+            var_name="${var%%=*}"
+            var_value="${var#*=}"
+            conf_file_set "${ODOO_CONF_FILE}" "options.${var_name}" "${var_value}"
+        done <<< "${VARS}"
+        IFS="$OLDIFS"
+    fi
+
     elog "fixing permissions for odoo config file"
     erunquiet sudo chmod 640 "${ODOO_CONF_FILE}"
     erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_CONF_FILE}"
@@ -626,6 +639,9 @@ doh_profile_load() {
     OLDIFS="${IFS}"
     SECTIONS=$(conf_file_get_sections "${DIR_ROOT}/odoo.profile")
     for section in ${SECTIONS}; do
+        if [ x"${section}" = x"server" ]; then
+            continue  # server section contain only odoo-server.conf options
+        fi
         export CONF_${section^^}="1"  # mark section as present
         VARS=$(conf_file_get_options "${DIR_ROOT}/odoo.profile" "${section}")
         IFS=$'\n'; while read -r var; do
