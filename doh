@@ -401,6 +401,31 @@ doh_git_ssh_handler() {
     ssh $SSH_EXTRA_ARGS "$@"
 }
 
+doh_gitlab_project_set_forked_from() {
+    # $1: gitlab url, $2: project, $3: forked_from_project
+    if [ $# -lt 3 ]; then
+        die "Wrong number of parameters for 'doh_gitlab_project_set_forked_from'"
+    fi
+
+    url=$(gitlab_extract_baseurl "$1")
+    api_url="${url}/api/v3"
+
+    edebug "querying project id for project name '${2}'"
+    project_name=$(echo "$2" | urlencode)
+    gitlab_api_query "${api_url}/projects/${project_name}" \
+        || die "Unable to get project '$2' information"
+    project_id=$(echo "${GITLAB_API_RESULT}" | py_json_get_value "id")
+
+    edebug "querying project id for project name '${3}'"
+    forked_project_name=$(echo "$3" | urlencode)
+    gitlab_api_query "${api_url}/projects/${forked_project_name}" \
+        || die "Unable to get project '$3' information"
+    forked_project_id=$(echo "${GITLAB_API_RESULT}" | py_json_get_value "id")
+
+    edebug "setting project '${2}' (id: ${project_id}) as forked from '${3}' (id: ${forked_project_id})"
+    gitlab_api_query "${api_url}/projects/${project_id}/fork/${forked_project_id}" "--method=POST"
+}
+
 doh_fetch_file() {
     # $1: URL, "$2": output file
     if [ $# -lt 2 ]; then
