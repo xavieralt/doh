@@ -517,7 +517,7 @@ db_config_local_server() {
     ROLES=$(erun sudo -u postgres psql -Atc "SELECT rolname FROM pg_roles WHERE rolname = '$USER'" postgres)
     ROLES_COUNT=$(echo $ROLES | sed '/^$/d' | wc -l)
     if [ $ROLES_COUNT -eq 0 ]; then
-        elog "Creating PostgreSQL role for user $USER"
+        elog "creating postgresql role for user $USER"
 
         CREATE_USER_ARGS="NOSUPERUSER CREATEDB NOCREATEROLE INHERIT LOGIN;"
         if [ x"$DB_PASS" != x"" ]; then
@@ -535,7 +535,7 @@ doh_generate_server_config_file() {
     # ODOO_ADDONS_PATH="${DIR_ADDONS},${DIR_EXTRA}"
     ODOO_ADDONS_PATH="${DOH_ADDONS_PATH}"
 
-    elog "Generating Odoo config file"
+    elog "generating odoo config file"
     cat <<EOF | erunquiet tee "${ODOO_CONF_FILE}"
 [addons]
 [options]
@@ -547,7 +547,7 @@ db_user = ${CONF_DB_USER}
 db_password = ${CONF_DB_PASS:-False}
 addons_path = ${ODOO_ADDONS_PATH}
 EOF
-    elog "Fixing permissions for Odoo config file"
+    elog "fixing permissions for odoo config file"
     erunquiet sudo chmod 640 "${ODOO_CONF_FILE}"
     erunquiet sudo chown "${RUNAS}:adm" "${ODOO_CONF_FILE}"
 }
@@ -567,7 +567,7 @@ doh_generate_server_init_file() {
         TMPL_INIT_FILE="${DIR_MAIN}/debian/init"
     fi
 
-    elog "Updating Odoo init script"
+    elog "updating odoo init script"
     sed \
         -e "s#^DAEMON=.*\$#DAEMON=${DIR_MAIN}/openerp-server#" \
         -e "s/^\\(NAME\\|DESC\\)=.*\$/\\1=${CONF_PROFILE_NAME}/" \
@@ -585,14 +585,14 @@ doh_config_init() {
     doh_generate_server_config_file
     doh_generate_server_init_file
 
-    elog "Fixing permissions for Odoo log file"
+    elog "fixing permissions for odoo log file"
     erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
     erunquiet sudo touch "${ODOO_LOG_FILE}"
     erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
     erunquiet sudo chown "${RUNAS}:adm" "${ODOO_LOG_FILE}"
 
     if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
-        elog "Adding Odoo '${CONF_PROFILE_NAME}' to autostart"
+        elog "adding odoo '${CONF_PROFILE_NAME}' to autostart"
         erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
     fi
 }
@@ -918,14 +918,14 @@ doh_svc_is_running() {
 
 doh_svc_start() {
     if ! doh_svc_is_running; then
-        elog "Starting service: odoo-${CONF_PROFILE_NAME}"
+        elog "starting service: odoo-${CONF_PROFILE_NAME}"
         erunquiet sudo service "odoo-${CONF_PROFILE_NAME}" start
     fi
 }
 
 doh_svc_stop() {
     if doh_svc_is_running; then
-        elog "Stopping service: odoo-${CONF_PROFILE_NAME}"
+        elog "stopping service: odoo-${CONF_PROFILE_NAME}"
         erunquiet sudo service "odoo-${CONF_PROFILE_NAME}" stop
     fi
 }
@@ -1398,7 +1398,7 @@ CMD="$1"; shift;
 case $CMD in
     internal-self-upgrade|--self-upgrade)
         # TOOD: add self-upgrading function
-        elog "Going to upgrade doh (path: $0) with remote version, press ENTER to continue or Ctrl-C to cancel"
+        elog "going to upgrade doh (path: $0) with remote version, press ENTER to continue or Ctrl-C to cancel"
         read ok
         tmp_doh=`mktemp`
         wget -q -O "${tmp_doh}" "https://raw.githubusercontent.com/xavieralt/doh/master/doh" || die 'Unable to fetch remote doh'
