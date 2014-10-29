@@ -1022,8 +1022,7 @@ HELP_CMD_CONFIG
         cmd_help "config"
     fi
 
-    doh_profile_load
-    local conffile="${DIR_ROOT}/odoo.profile"
+    local conffile=$(doh_profile_find)
 
     if [ x"${listall}" = x"1" ]; then
         local SECTIONS=$(conf_file_get_sections "${conffile}")
@@ -1032,7 +1031,7 @@ HELP_CMD_CONFIG
         local opt_value=""
 
         for section in ${SECTIONS}; do
-            VARS=$(conf_file_get_options "${DIR_ROOT}/odoo.profile" "${section}")
+            VARS=$(conf_file_get_options "${conffile}" "${section}")
             IFS=$'\n'; while read -r var; do
                 [ x"${var}" = x"" ] && continue
                 opt_name="${var%%=*}"
@@ -1042,11 +1041,11 @@ HELP_CMD_CONFIG
             IFS="$OLDIFS"
         done
     elif [ x"${varunset}" = x"1" ]; then
-        conf_file_unset "${DIR_ROOT}/odoo.profile" "$1"
+        conf_file_unset "${conffile}" "$1"
     elif [ $# -ge 2 ]; then
-        conf_file_set "${DIR_ROOT}/odoo.profile" "$1" "$2"
+        conf_file_set "${conffile}" "$1" "$2"
     else
-        echo $(conf_file_get "${DIR_ROOT}/odoo.profile" "$1")
+        echo $(conf_file_get "${conffile}" "$1")
     fi
 }
 
