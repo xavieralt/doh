@@ -1397,8 +1397,10 @@ HELP_CMD_STOP
     doh_svc_stop
 }
 
-if [ x"${GIT_INTERNAL_GETTEXT_SH_SCHEME}" != x"" ] && [ x"${GIT_SSH}" = x"$0" ]; then
-    # special case when calling our-self as GIT_SSH handler
+# special case when calling our-self as GIT_SSH handler
+ppid_exe=$(readlink /proc/$PPID/exe)
+ppid_name=$(basename "${ppid_exe}")
+if [ x"${GIT_SSH}" = x"$0" ] && [ x"${ppid_name}" = x"git" ]; then
     doh_git_ssh_handler "$@";
     exit 0;
 fi
