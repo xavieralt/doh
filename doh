@@ -394,12 +394,17 @@ doh_check_bootstrap_depends() {
     local dexe
     local dexe_path
 
-    local sudo_path=$(which sudo)
-    if [ $? -ne 0 ]; then
-        die 'please install sudo before starting/installing doh'
+    dpkg_check_packages_installed $deps
+
+    if ! (dpkg --compare-versions "$(git --version | awk '{print $NF}')" ">=" "1.9"); then
+        die "please upgrade git version to at least 1.9
+    sudo apt-get install python-software-properties
+    sudo add-apt-repository ppa:git-core/ppa
+    sudo apt-get update
+    sudo apt-get install git
+"
     fi
 
-    dpkg_check_packages_installed $deps
     return $TRUE
 }
 
@@ -1546,6 +1551,18 @@ if [ x"${USER}" = x"" ]; then
     USER=$(getent passwd $UID | cut -d: -f1)
 fi
 
+# stage 0 dependencies
+stage_0_missing=0
+for exe in sudo wget; do
+    exe_path=$(which "${exe}")
+    if [ $? -ne 0 ]; then
+        eerror 'please install ${exe} before starting/installing doh'
+        stage_0_missing=1
+    fi
+done
+[[ x"${stage_0_missing}" = x"1" ]] && exit 2;
+
+
 CMD="$1"; shift;
 case $CMD in
     internal-self-upgrade|--self-upgrade|--install)
@@ -1553,8 +1570,6 @@ case $CMD in
         if [ x"${CMD}" = x"--install" ] || [ x"${0}" = x"bash" ]; then
             doh_path="/usr/local/bin/doh"
         fi
-
-        doh_check_bootstrap_depends
 
         if [ -e "${doh_path}" ] && [ -t 0 ]; then
             # ask user about upgrading
@@ -1575,6 +1590,8 @@ case $CMD in
         (cat "${tmp_doh}" | sudo tee "${doh_path}" >/dev/null) || die 'Unable to update doh'
         sudo chmod 755 "${doh_path}"  # ensure script is executable
 
+        # check bootstrap depends might fail, testing that as end
+        doh_check_bootstrap_depends
         exit 0
         ;;
     --version)
