@@ -1511,6 +1511,11 @@ if [ x"${GIT_SSH}" = x"$0" ] && [ x"${ppid_name}" = x"git" ]; then
     exit 0;
 fi
 
+if [ x"${USER}" = x"" ]; then
+    # no user defined in env
+    USER=$(getent passwd $UID | cut -d: -f1)
+fi
+
 CMD="$1"; shift;
 case $CMD in
     internal-self-upgrade|--self-upgrade|--install)
