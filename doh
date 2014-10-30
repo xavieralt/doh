@@ -580,7 +580,7 @@ doh_generate_server_config_file() {
     ODOO_ADDONS_PATH="${DOH_ADDONS_PATH}"
 
     elog "generating odoo config file"
-    cat <<EOF | erunquiet tee "${ODOO_CONF_FILE}"
+    cat <<EOF | erunquiet sudo tee "${ODOO_CONF_FILE}"
 [addons]
 [options]
 ; This is the password that allows database operations:
@@ -971,7 +971,7 @@ doh_run_server() {
     doh_check_dirs
 
     if [ ! -e "${DIR_CONF}/odoo-server.conf" ]; then
-        doh_generate_server_config_file
+        die "odoo server configuration file is missing, please re-run 'doh reconfigure'"
     fi
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
