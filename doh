@@ -1454,6 +1454,10 @@ HELP_CMD_STOP
 
 # special case when calling our-self as GIT_SSH handler
 ppid_exe=$(readlink /proc/$PPID/exe)
+if [ $? -ne 0 ] && [ x"${GIT_INTERNAL_GETTEXT_SH_SCHEME}" != x"" ]; then
+    # reading exe link might fail when running in container, fallback to env identification
+    ppid_exe=$(which git)
+fi
 ppid_name=$(basename "${ppid_exe}")
 if [ x"${GIT_SSH}" = x"$0" ] && [ x"${ppid_name}" = x"git" ]; then
     doh_git_ssh_handler "$@";
