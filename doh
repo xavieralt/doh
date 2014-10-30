@@ -118,7 +118,7 @@ eexist() {
 
 eremove() {
     if [ -e "$1" ] ; then
-        ewarn "Deleting $1"
+        edebug "deleting $1"
         rm -Rf "$1"
     fi
 }
@@ -848,7 +848,7 @@ doh_update_section() {
         pushd "${section_dir}"
         elog "fetching odoo patch"
         local patchset_tmp=`mktemp`
-        erunquiet wget -q -O "${patchset_tmp}" "${section_patchset}"
+        doh_fetch_file "${section_patchset}" "${patchset_tmp}"
         elog "apply odoo patch locally"
         erunquiet git -C "${section_dir}" apply "${patchset_tmp}"
         eremove "${patchset_tmp}"
