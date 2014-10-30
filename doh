@@ -285,7 +285,7 @@ gitlab_cache_auth_token() {
         local session_url="$1/api/v3/session"
         gitlab_username=$(echo "${gitlab_username}" | urlencode)
         gitlab_password=$(echo "${gitlab_password}" | urlencode)
-        local session=$(curl -f -s "${session_url}" --data "login=${gitlab_username}&password=${gitlab_password}")
+        local session=$(wget -q -O- "${session_url}" --post-data "login=${gitlab_username}&password=${gitlab_password}")
         if [ x"${session}" = x"" ]; then
             eerror 'Unable to authenticate to gitlab (wrong password?)'
             return $FALSE
