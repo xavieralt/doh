@@ -50,14 +50,12 @@ erunquiet() {
 }
 
 erun() {
-    if [ x"$1" = x"-q" ]; then
-        quiet=1; shift;
-    fi
-    edebug "will run: $@"
     if [ x"$1" = x"--show" ]; then
         shift;
+        edebug "will run: $@"
         "$@" >&6 2>&7
     else
+        edebug "will run: $@"
         "$@" >>${DOH_LOGFILE} 2>&1
     fi
     return $?
