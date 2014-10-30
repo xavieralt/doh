@@ -496,17 +496,18 @@ install_postgresql_server() {
 }
 
 db_client_setup_env() {
+    # $1: postgresql env to set
     doh_profile_load
 
-    if [ x"$CONF_DB_HOST" != x"" ]; then
-        if [ x"$CONF_DB_USER" = x"" ]; then
-            die "Config parameter DB_USER is mandatory when using DB_HOST"
-        fi
-        if [ x"$CONF_DB_PASS" = x"" ]; then
-            die "Config parameter DB_PASS is mandatory when using DB_HOST"
-        fi
-    fi
-    for v in HOST PORT USER PASS; do
+    local pgvars_all="HOST PORT USER PASSWORD"
+    local pgvars="${1:-${pgvars_all}}"
+    local db_var
+    local pg_var
+
+    for v in ${pgvars_all}; do
+        unset "PG${var}"
+    done
+    for v in ${pgvars}; do
         db_var="CONF_DB_${v}"
         pg_var="PG${v}"
         if [ x"${!db_var}" != x"" ]; then
@@ -515,8 +516,15 @@ db_client_setup_env() {
     done
 }
 
+db_get_server_is_local() {
+    # $1: database hostname
+    [[ "${CONF_DB_HOST}" =~ ^(|localhost|127.0.0.1)$ ]]
+    return $?
+}
+
 db_get_server_version() {
-    db_client_setup_env
+    doh_profile_load
+    db_client_setup_env $(db_get_server_is_local && echo "PORT")
     echo -n $(psql -A -t -c 'SHOW server_version' postgres)
 }
 
@@ -533,18 +541,29 @@ db_get_server_local_cmd() {
 }
 
 db_config_local_server() {
-    db_client_setup_env
+    doh_profile_load
 
-    ROLES=$(erun sudo -u postgres psql -Atc "SELECT rolname FROM pg_roles WHERE rolname = '$USER'" postgres)
-    ROLES_COUNT=$(echo $ROLES | sed '/^$/d' | wc -l)
-    if [ $ROLES_COUNT -eq 0 ]; then
-        elog "creating postgresql role for user $USER"
+    if db_get_server_is_local; then
+        edebug "configuring local database server"
 
-        CREATE_USER_ARGS="NOSUPERUSER CREATEDB NOCREATEROLE INHERIT LOGIN;"
-        if [ x"$DB_PASS" != x"" ]; then
-            CREATE_USER_ARGS="ENCRYPTED PASSWORD '${DB_PASS}' $CREATE_USER_ARGS"
+        # only export PGPORT environement
+        # - server is local (dont care about HOST)
+        # - running admin ops (dont care about USER PASS)
+        db_client_setup_env "PORT"
+
+        local psql_bin_path=$(db_get_server_local_cmd "psql")
+        local roles=$(sudo -u postgres ${psql_bin_path} -Atc "SELECT rolname FROM pg_roles WHERE rolname = '${CONF_DB_USER}'" postgres)
+        local roles_count=$(echo ${roles} | sed '/^$/d' | wc -l)
+
+        if [ ${roles_count} -eq 0 ]; then
+            elog "creating postgresql role for user: ${CONF_DB_USER}"
+
+            create_user_args="NOSUPERUSER CREATEDB NOCREATEROLE INHERIT LOGIN;"
+            if [ x"$DBPASS" != x"" ]; then
+                create_user_args="ENCRYPTED PASSWORD '${CONF_DB_PASSWORD}' ${create_user_args}"
+            fi
+            erunquiet sudo -u postgres ${psql_bin_path} -Atc "CREATE ROLE \"${CONF_DB_USER}\" ${create_user_args}" || die 'Unable to create database user'
         fi
-        erunquiet sudo -u postgres psql -Atc "CREATE ROLE $USER $CREATE_USER_ARGS" || die 'Unable to create database user'
     fi
 }
 
@@ -564,7 +583,7 @@ doh_generate_server_config_file() {
 db_host = ${CONF_DB_HOST:-False}
 db_port = ${CONF_DB_PORT:-False}
 db_user = ${CONF_DB_USER}
-db_password = ${CONF_DB_PASS:-False}
+db_password = ${CONF_DB_PASSWORD:-False}
 addons_path = ${ODOO_ADDONS_PATH}
 EOF
 
@@ -719,8 +738,25 @@ doh_profile_load() {
     export DOH_ADDONS_PATH="${ADDONS_PATH}"
 
     export CONF_PROFILE_RUNAS="${CONF_PROFILE_RUNAS:-${USER}}"
-    if [ x"${CONF_PROFILE_RUNAS}" != x"$USER" ]; then
-        die "error: please re-run this command as '${CONF_PROFILE_RUNAS}' user (this is enforced by current profile)"
+
+    # check for db configuration
+    export CONF_DB_USER="${CONF_DB_USER:-${CONF_PROFILE_RUNAS}}"
+    export CONF_DB_PORT="${CONF_DB_PORT:-5432}"
+
+    if [ x"${CONF_DB_PASSWORD}" != x"" ] && [ x"${CONF_DB_HOST}" = x"" ]; then
+        CONF_DB_HOST="localhost"
+    fi
+    if [ x"${CONF_DB_USER}" != x"${CONF_PROFILE_RUNAS}" ] && [ x"${CONF_DB_HOST}" = x"" ]; then
+        die "please set db host in odoo.profile\n\
+    connecting to database local socket with a database user different from server's running user is not supported"
+    fi
+    if [ x"$CONF_DB_HOST" != x"" ]; then
+        if [ x"${CONF_DB_USER}" = x"" ]; then
+            die "Config parameter DB_USER is mandatory when using DB_HOST"
+        fi
+        if [ x"${CONF_DB_PASSWORD}" = x"" ]; then
+            die "Config parameter DB_PASSWORD is mandatory when using DB_HOST"
+        fi
     fi
 
     DOH_PROFILE_LOADED="1"
@@ -749,6 +785,8 @@ doh_reconfigure() {
     if [[ "${stage}" =~ ^(post|all) ]]; then
         elog "installing odoo dependencies (sudo)"
         doh_check_odoo_depends
+
+        db_config_local_server
 
         doh_generate_server_config_file
         doh_generate_server_init_file
@@ -1210,16 +1248,18 @@ HELP_CMD_INSTALL
     local profdir=""
     local profname=""
     local template=""
+    local local_database
+    local autostart
     OPTIND=1
     while getopts "dat:p:" opt; do
         case $opt in
             d)
                 # Install and use local database
-                local local_database=true
+                local_database=true
                 ;;
             a)
                 # Autostart profile on boot
-                local autostart=true
+                autostart=true
                 ;;
             p)
                 profname="${OPTARG}"
@@ -1257,6 +1297,11 @@ HELP_CMD_INSTALL
         CONF_PROFILE_AUTOSTART="1"
     fi
 
+    # force local database setup in profile db.host is empty
+    if db_get_server_is_local; then
+        local_database=true
+    fi
+
     doh_reconfigure "pre"
 
     elog "fetching odoo from remote git repository (this can take some time...)"
@@ -1268,7 +1313,6 @@ HELP_CMD_INSTALL
         elog "installing postgresql server (sudo)"
         install_postgresql_server
         erunquiet sudo service postgresql start || die 'PostgreSQL server doesnt seems to be running'
-        db_config_local_server
     fi
 
     doh_reconfigure "post"
