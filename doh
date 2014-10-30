@@ -1030,22 +1030,28 @@ doh_svc_restart() {
 
 cmd_help() {
 : <<HELP_CMD_HELP
-Usage: doh [OPTS | COMMAND] [COMMANDS OPTS...]
+Usage: doh [OPTIONS] COMMAND [COMMANDS OPTS...]
 
-Availables standalone options
+Availables options
+
   --self-upgrade    self-update doh to latest version
   --version         display doh version
 
 Available commands
-  install    install and setup a new odoo instance
-  update     update odoo and extra modules code
-  config     get and set odoo profile options
-  create-db  create a new database using current profile
-  drop-db    drop an existing database
-  upgrade-db upgrade a specific database
-  start      start odoo service
-  stop       stop odoo service
-  help       show this help message
+
+  install       install and setup a new odoo instance
+  update        update odoo and extra modules code
+  reconfigure   check and regenerate server/db configuration
+
+  help          show this help message
+  config        get and set odoo profile options
+
+  create-db     create a new database using current profile
+  drop-db       drop an existing database
+  upgrade-db    upgrade a specific database
+
+  start         start odoo service
+  stop          stop odoo service
 
 Use "doh help CMD" for detail about a specific command
 HELP_CMD_HELP
@@ -1362,6 +1368,14 @@ HELP_CMD_UPGRADE
     done
 }
 
+cmd_reconfigure() {
+: <<HELP_CMD_RECONFIGURE
+doh reconfigure
+HELP_CMD_RECONFIGURE
+
+    doh_profile_load
+    doh_reconfigure
+}
 
 cmd_create_db() {
 : <<HELP_CMD_CREATE_DB
