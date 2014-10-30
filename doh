@@ -357,7 +357,7 @@ dpkg_check_packages_installed() {
 
     if ! [ -z "${missing_pkgs}" ]; then
         elog "installing missing dependencies: ${missing_pkgs} (sudo)"
-        erunquiet DEBIAN_FRONTEND="noninteractive" sudo apt-get -y --no-install-recommends install ${missing_pkgs}
+        DEBIAN_FRONTEND="noninteractive" erunquiet sudo apt-get -y --no-install-recommends install ${missing_pkgs}
     fi
 }
 
