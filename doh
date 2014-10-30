@@ -345,6 +345,21 @@ gitlab_api_query() {
     fi
 }
 
+dpkg_check_packages_installed() {
+    local installed="$(dpkg --list | grep '^ii' | awk '{print $2}')"
+    local missing_pkgs=""
+
+    for pkg in $@; do
+        if ! (echo "${installed}" | grep -E "^${pkg}\$" >/dev/null 2>&1); then
+            missing_pkgs="${missing_pkgs} ${pkg}"
+        fi
+    done
+
+    if ! [ -z "${missing_pkgs}" ]; then
+        elog "installing missing dependencies: ${missing_pkgs} (sudo)"
+        erunquiet sudo apt-get -y --no-install-recommends install ${missing_pkgs}
+    fi
+}
 
 assert_in() {
     local r=$FALSE
@@ -373,27 +388,18 @@ helper_is_dir_repo() {
 }
 
 doh_check_bootstrap_depends() {
-    local deps="7z:p7zip-full git:git python:python patch:patch ssh:ssh-client"
+    local deps="p7zip-full git python patch openssh-client"
     local missing_pkg=""
     local dpkg
     local dexe
     local dexe_path
 
-    for d in ${deps}; do
-        dexe="${d%%:*}"
-        dpkg="${d#*:}"
-        dexe_path=$(which "${dexe}")
-        if [ $? -ne 0 ]; then
-            edebug "checking for ${dexe}: not found"
-            missing_pkg="${missing_pkg} ${dpkg}"
-        else
-            edebug "checking for ${dexe}: found at ${dexe_path}"
-        fi
-    done
-    if [ x"${missing_pkg}" != x"" ]; then
-        elog "installing missing dependencies: ${missing_pkg} (sudo)"
-        erunquiet sudo apt-get -y --no-install-recommends install ${missing_pkg}
+    local sudo_path=$(which sudo)
+    if [ $? -ne 0 ]; then
+        die 'please install sudo before starting/installing doh'
     fi
+
+    dpkg_check_packages_installed $deps
     return $TRUE
 }
 
@@ -402,7 +408,7 @@ doh_check_odoo_depends() {
 
     DEPENDS=$(sed -ne '/^Depends:/, /^[^ ]/{/^Depends:/{n;n};/^[^ ]/{q;};s/,$//;p;}' \
         "${DIR_MAIN}/debian/control")
-    erunquiet sudo apt-get -y --no-install-recommends install ${DEPENDS}
+    dpkg_check_packages_installed $DEPENDS
 }
 
 doh_git_ssh_handler() {
