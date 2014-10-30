@@ -1441,14 +1441,29 @@ fi
 
 CMD="$1"; shift;
 case $CMD in
-    internal-self-upgrade|--self-upgrade)
-        # TOOD: add self-upgrading function
-        elog "going to upgrade doh (path: $0) with remote version, press ENTER to continue or Ctrl-C to cancel"
-        read ok
+    internal-self-upgrade|--self-upgrade|--install)
+        doh_path="$0"
+        if [ x"${CMD}" = x"--install" ] || [ x"${0}" = x"bash" ]; then
+            doh_path="/usr/local/bin/doh"
+        fi
+
+        if [ -e "${doh_path}" ] && [ -t 0 ]; then
+            # ask user about upgrading
+            while true; do
+                read -p "update doh (at ${doh_path}) with new version [y/n] " REPLY;
+                if [ x"${REPLY}" = x"n" ]; then
+                    exit 0;
+                fi
+                if [ x"${REPLY}" = x"y" ]; then
+                    break;
+                fi
+            done
+        fi
+
         tmp_doh=`mktemp`
         wget -q -O "${tmp_doh}" "https://raw.githubusercontent.com/xavieralt/doh/master/doh" || die 'Unable to fetch remote doh'
-        (cat "${tmp_doh}" | sudo tee "$0" >/dev/null) || die 'Unable to update doh'
-        sudo chmod 755 "$0"  # ensure script is executable
+        (cat "${tmp_doh}" | sudo tee "${doh_path}" >/dev/null) || die 'Unable to update doh'
+        sudo chmod 755 "${doh_path}"  # ensure script is executable
         exit 0
         ;;
     --version)
