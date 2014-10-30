@@ -727,33 +727,42 @@ doh_profile_load() {
 }
 
 doh_reconfigure() {
+    # $1: stage
     doh_profile_load
     doh_check_dirs
 
-    elog "installing odoo dependencies (sudo)"
-    doh_check_odoo_depends
+    local stage="${1:-all}"
 
-    # fetch remote deploy-key if none local
-    if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ]; then
-        doh_check_dirs "DIR_CONF"
-        elog "fetching profile deploy-key"
-        touch "${DIR_CONF}/deploy.key"
-        chmod 0600 "${DIR_CONF}/deploy.key"
-        doh_fetch_file "${CONF_PROFILE_DEPLOY_KEY}" "${DIR_CONF}/deploy.key"
+    if [[ "${stage}" =~ ^(pre|all)$ ]]; then
+        doh_check_bootstrap_depends
+
+        # fetch remote deploy-key if none local
+        if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ]; then
+            doh_check_dirs "DIR_CONF"
+            elog "fetching profile deploy-key"
+            touch "${DIR_CONF}/deploy.key"
+            chmod 0600 "${DIR_CONF}/deploy.key"
+            doh_fetch_file "${CONF_PROFILE_DEPLOY_KEY}" "${DIR_CONF}/deploy.key"
+        fi
     fi
 
-    doh_generate_server_config_file
-    doh_generate_server_init_file
+    if [[ "${stage}" =~ ^(post|all) ]]; then
+        elog "installing odoo dependencies (sudo)"
+        doh_check_odoo_depends
 
-    elog "fixing permissions for odoo log file"
-    erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
-    erunquiet sudo touch "${ODOO_LOG_FILE}"
-    erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
-    erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_LOG_FILE}"
+        doh_generate_server_config_file
+        doh_generate_server_init_file
 
-    if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
-        elog "adding odoo '${CONF_PROFILE_NAME}' to autostart"
-        erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
+        elog "fixing permissions for odoo log file"
+        erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
+        erunquiet sudo touch "${ODOO_LOG_FILE}"
+        erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
+        erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_LOG_FILE}"
+
+        if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
+            elog "adding odoo '${CONF_PROFILE_NAME}' to autostart"
+            erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
+        fi
     fi
 }
 
@@ -1248,11 +1257,7 @@ HELP_CMD_INSTALL
         CONF_PROFILE_AUTOSTART="1"
     fi
 
-    # ensure all directories exists
-    doh_check_dirs
-
-    elog 'installing prerequisite dependencies (sudo)'
-    doh_check_bootstrap_depends
+    doh_reconfigure "pre"
 
     elog "fetching odoo from remote git repository (this can take some time...)"
     for part in $DOH_PARTS; do
@@ -1266,7 +1271,7 @@ HELP_CMD_INSTALL
         db_config_local_server
     fi
 
-    doh_reconfigure
+    doh_reconfigure "post"
 
     if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
         elog "starting odoo (sudo)"
