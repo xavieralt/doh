@@ -357,7 +357,7 @@ dpkg_check_packages_installed() {
 
     if ! [ -z "${missing_pkgs}" ]; then
         elog "installing missing dependencies: ${missing_pkgs} (sudo)"
-        erunquiet sudo apt-get -y --no-install-recommends install ${missing_pkgs}
+        erunquiet DEBIAN_FRONTEND="noninteractive" sudo apt-get -y --no-install-recommends install ${missing_pkgs}
     fi
 }
 
@@ -498,10 +498,6 @@ doh_fetch_file() {
         return $TRUE
     fi
     return $FALSE
-}
-
-install_postgresql_server() {
-    erunquiet sudo apt-get -y --no-install-recommends install postgresql
 }
 
 db_client_setup_env() {
@@ -1336,7 +1332,7 @@ HELP_CMD_INSTALL
 
     if [ x"$local_database" = x"true" ]; then
         elog "installing postgresql server (sudo)"
-        install_postgresql_server
+        dpkg_check_packages_installed "postgresql"
         erunquiet sudo service postgresql start || die 'PostgreSQL server doesnt seems to be running'
     fi
 
