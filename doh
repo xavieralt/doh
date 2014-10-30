@@ -972,7 +972,7 @@ Availables standalone options
 
 Available commands
   install    install and setup a new odoo instance
-  upgrade    upgrade odoo and extra modules
+  update     update odoo and extra modules code
   config     get and set odoo profile options
   create-db  create a new database using current profile
   drop-db    drop an existing database
@@ -1262,6 +1262,9 @@ cmd_upgrade() {
 doh upgrade [DATABASE ...]
 HELP_CMD_UPGRADE
 
+    ewarn "command 'upgrade' is deprecated"
+    ewarn "please use command 'update', then followed by command 'upgrade-db'"
+
     doh_profile_load
     doh_profile_update
     doh_check_dirs
@@ -1276,6 +1279,21 @@ HELP_CMD_UPGRADE
         done
     fi
 }
+
+cmd_update() {
+: <<HELP_CMD_UPGRADE
+doh update
+HELP_CMD_UPGRADE
+
+    doh_profile_load
+    doh_profile_update
+    doh_check_dirs
+
+    for part in $DOH_PARTS; do
+        doh_update_section "${part}"
+    done
+}
+
 
 cmd_create_db() {
 : <<HELP_CMD_CREATE_DB
