@@ -374,8 +374,29 @@ helper_is_dir_repo() {
     fi
 }
 
-install_bootstrap_depends() {
-    erunquiet sudo apt-get -y --no-install-recommends install p7zip-full git
+doh_check_bootstrap_depends() {
+    local deps="7z:p7zip-full git:git python:python"
+    local missing_pkg=""
+    local dpkg
+    local dexe
+    local dexe_path
+
+    for d in ${deps}; do
+        dexe="${d%%:*}"
+        dpkg="${d#*:}"
+        dexe_path=$(which "${dexe}")
+        if [ $? -ne 0 ]; then
+            edebug "checking for ${dexe}: not found"
+            missing_pkg="${missing_pkg} ${dpkg}"
+        else
+            edebug "checking for ${dexe}: found at ${dexe_path}"
+        fi
+    done
+    if [ x"${missing_pkg}" != x"" ]; then
+        elog "installing missing dependencies: ${missing_pkg} (sudo)"
+        erunquiet sudo apt-get -y --no-install-recommends install p7zip-full git
+    fi
+    return $TRUE
 }
 
 doh_check_odoo_depends() {
@@ -1231,7 +1252,7 @@ HELP_CMD_INSTALL
     doh_check_dirs
 
     elog 'installing prerequisite dependencies (sudo)'
-    install_bootstrap_depends
+    doh_check_bootstrap_depends
 
     elog "fetching odoo from remote git repository (this can take some time...)"
     for part in $DOH_PARTS; do
@@ -1447,6 +1468,8 @@ case $CMD in
             doh_path="/usr/local/bin/doh"
         fi
 
+        doh_check_bootstrap_depends
+
         if [ -e "${doh_path}" ] && [ -t 0 ]; then
             # ask user about upgrading
             while true; do
@@ -1464,6 +1487,8 @@ case $CMD in
         wget -q -O "${tmp_doh}" "https://raw.githubusercontent.com/xavieralt/doh/master/doh" || die 'Unable to fetch remote doh'
         (cat "${tmp_doh}" | sudo tee "${doh_path}" >/dev/null) || die 'Unable to update doh'
         sudo chmod 755 "${doh_path}"  # ensure script is executable
+
+        doh_check_bootstrap_depends
         exit 0
         ;;
     --version)
@@ -1471,6 +1496,7 @@ case $CMD in
         ;;
     *)
         doh_setup_logging
+        doh_check_bootstrap_depends
         if [ x"$CMD" != x"" ]; then
             CMD_FUNC="cmd_${CMD//-/_}"
             CMD_TYPE=$(type -t "$CMD_FUNC")
