@@ -373,7 +373,7 @@ helper_is_dir_repo() {
 }
 
 doh_check_bootstrap_depends() {
-    local deps="7z:p7zip-full git:git python:python"
+    local deps="7z:p7zip-full git:git python:python patch:patch ssh:ssh-client"
     local missing_pkg=""
     local dpkg
     local dexe
