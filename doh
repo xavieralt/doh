@@ -776,7 +776,7 @@ doh_reconfigure() {
         runas_entry=$(getent passwd "${CONF_PROFILE_RUNAS}")
         if [ $? -ne 0 ]; then
             elog "adding new system user '${CONF_PROFILE_RUNAS}' (sudo)"
-            erun sudo adduser --system --quiet "${CONF_PROFILE_RUNAS}"
+            erun sudo adduser --system --quiet --group "${CONF_PROFILE_RUNAS}"
         fi
 
         # fetch remote deploy-key if none local
