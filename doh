@@ -520,14 +520,15 @@ db_get_server_is_local() {
     return $?
 }
 
-db_get_server_version() {
-    doh_profile_load
-    db_client_setup_env $(db_get_server_is_local && echo "PORT")
-    echo -n $(psql -A -t -c 'SHOW server_version' postgres)
-}
-
 db_get_server_local_cmd() {
-    local v=$(db_get_server_version | cut -d'.' -f -2)
+    doh_profile_load
+
+    if ! db_get_server_is_local; then
+        echo "$1";
+        return $TRUE
+    fi
+    db_client_setup_env "PORT"
+    local v=$(sudo -u postgres psql -A -t -c 'SHOW server_version' postgres | cut -d'.' -f -2)
     local server_bin_path="/usr/lib/postgresql/${v}/bin"
 
     if [ -d "${server_bin_path}" ]; then
