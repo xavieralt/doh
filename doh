@@ -462,7 +462,7 @@ doh_fetch_file() {
         die "Wrong number of parameters for 'doh_fetch_file'"
     fi
 
-    gitlab_url_match='^((http)[s]?://([^/]+)[/]?)((.*)/snippets/([0-9]|[^/]*).*)$'
+    gitlab_url_match='^((http)[s]?://([^/]+)[/]?)((.*)/snippets/([0-9]+|[^/]*).*)$'
     if [[ "${1}" =~ ${gitlab_url_match} ]]; then
         edebug "loading remote gitlab snippet from: ${1}"
         profile_baseloc="${BASH_REMATCH[1]}"
