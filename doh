@@ -394,7 +394,7 @@ doh_check_bootstrap_depends() {
     done
     if [ x"${missing_pkg}" != x"" ]; then
         elog "installing missing dependencies: ${missing_pkg} (sudo)"
-        erunquiet sudo apt-get -y --no-install-recommends install p7zip-full git
+        erunquiet sudo apt-get -y --no-install-recommends install ${missing_pkg}
     fi
     return $TRUE
 }
@@ -1489,7 +1489,6 @@ case $CMD in
         (cat "${tmp_doh}" | sudo tee "${doh_path}" >/dev/null) || die 'Unable to update doh'
         sudo chmod 755 "${doh_path}"  # ensure script is executable
 
-        doh_check_bootstrap_depends
         exit 0
         ;;
     --version)
