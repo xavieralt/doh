@@ -1484,7 +1484,8 @@ case $CMD in
         fi
 
         tmp_doh=`mktemp`
-        wget -q -O "${tmp_doh}" "https://raw.githubusercontent.com/xavieralt/doh/master/doh" || die 'Unable to fetch remote doh'
+        doh_branch="${1:-master}"
+        wget -q -O "${tmp_doh}" "https://raw.githubusercontent.com/xavieralt/doh/${doh_branch}/doh" || die 'Unable to fetch remote doh'
         (cat "${tmp_doh}" | sudo tee "${doh_path}" >/dev/null) || die 'Unable to update doh'
         sudo chmod 755 "${doh_path}"  # ensure script is executable
 
