@@ -665,6 +665,8 @@ doh_profile_load() {
         local profile_url="${profile}"
         profile="${DIR_ROOT}/odoo.profile"
         doh_fetch_file "${profile_url}" "${profile}" || die 'Unable to fetch remote profile'
+        sudo chmod 640 "${profile}"
+        sudo chown "$USER:adm" "${profile}"
 
     elif [ -f "${profile}" ]; then
         if [ ! "${profile}" -ef "${DIR_ROOT}/odoo.profile" ]; then
@@ -769,6 +771,13 @@ doh_reconfigure() {
 
     if [[ "${stage}" =~ ^(pre|all)$ ]]; then
         doh_check_bootstrap_depends
+
+        # check run-as user
+        runas_entry=$(getent passwd "${CONF_PROFILE_RUNAS}")
+        if [ $? -ne 0 ]; then
+            elog "adding new system user '${CONF_PROFILE_RUNAS}' (sudo)"
+            erun sudo adduser --system --quiet "${CONF_PROFILE_RUNAS}"
+        fi
 
         # fetch remote deploy-key if none local
         if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ]; then
