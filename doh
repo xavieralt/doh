@@ -615,7 +615,7 @@ doh_generate_server_init_file() {
 
     ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
     ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
-    ODOO_DAEMON="${DIR_MAIN}/bin/openerp-server"
+    ODOO_DAEMON="${DIR_MAIN}/openerp-server"
 
     if [[ "${CONF_PROFILE_VERSION:-8.0}" =~ ^(6.0)$ ]]; then
         TMPL_INIT_FILE="${DIR_MAIN}/debian/openerp-server.init"
