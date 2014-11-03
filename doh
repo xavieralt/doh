@@ -50,14 +50,12 @@ erunquiet() {
 }
 
 erun() {
-    if [ x"$1" = x"-q" ]; then
-        quiet=1; shift;
-    fi
-    edebug "will run: $@"
     if [ x"$1" = x"--show" ]; then
         shift;
+        edebug "will run: $@"
         "$@" >&6 2>&7
     else
+        edebug "will run: $@"
         "$@" >>${DOH_LOGFILE} 2>&1
     fi
     return $?
@@ -118,7 +116,7 @@ eexist() {
 
 eremove() {
     if [ -e "$1" ] ; then
-        ewarn "Deleting $1"
+        edebug "deleting $1"
         rm -Rf "$1"
     fi
 }
@@ -143,7 +141,7 @@ conf_file_get_options() {
     local conffile="$1"
     local section="$2"
     if (grep -E "^\[${section}\]$" "${conffile}" >/dev/null); then
-        sed -n "/^\[${section}\]/,$ { /^\[/{s/^\[\(.*\)\]$/\1/; x; d}; x; /^${section}$/!{x; d; n}; x; /^#/d; s/[ \\t]*$//; p;}" "${conffile}"
+        sed -n "/^\[${section}\]/,$ { /^\[/{s/^\[\(.*\)\]$/\1/; x; d}; x; /^${section}$/!{x; d; n}; x; /^#/d; s/[ \\t]*$//; /^$/d; p;}" "${conffile}"
         return $TRUE
     else
         return $FALSE
@@ -285,7 +283,7 @@ gitlab_cache_auth_token() {
         local session_url="$1/api/v3/session"
         gitlab_username=$(echo "${gitlab_username}" | urlencode)
         gitlab_password=$(echo "${gitlab_password}" | urlencode)
-        local session=$(curl -f -s "${session_url}" --data "login=${gitlab_username}&password=${gitlab_password}")
+        local session=$(curl -s -f "${session_url}" --data "login=${gitlab_username}&password=${gitlab_password}")
         if [ x"${session}" = x"" ]; then
             eerror 'Unable to authenticate to gitlab (wrong password?)'
             return $FALSE
@@ -320,7 +318,7 @@ gitlab_extract_baseurl() {
 gitlab_identify_site() {
     gitlab_url=$(gitlab_extract_baseurl "$1") || return $FALSE
     session_url="${gitlab_url}/api/v3/session"
-    session_url_status=$(wget -O- -S -q "${session_url}" 2>&1 | sed -n '/\s*HTTP/{s#\s*HTTP\/.\.. \([0-9]*\) .*#\1#; p; q};')
+    session_url_status=$(curl -s --dump-header - "${session_url}" 2>&1 | sed -n '/\s*HTTP/{s#\s*HTTP\/.\.. \([0-9]*\) .*#\1#; p; q};')
     if [ x"$session_url_status" = x"405" ]; then
         return $TRUE
     else
@@ -330,7 +328,7 @@ gitlab_identify_site() {
 
 gitlab_api_query() {
     # $1: gitlab url
-    # $2: wget extra args
+    # $2: curl extra args
     gitlab_url=$(gitlab_extract_baseurl "$1")
     if [ $? -ne 0 ]; then
         die "Unable to extract Gitlab base url from $1"
@@ -339,7 +337,7 @@ gitlab_api_query() {
     gitlab_cache_auth_token "${gitlab_url}" || die "Unable to get authentication token"
     auth_token="${GITLAB_CACHED_AUTH_TOKENS[${gitlab_url}]}"
 
-    GITLAB_API_RESULT=$(wget -q -O- --header "PRIVATE-TOKEN: ${auth_token}" "$1" $2)
+    GITLAB_API_RESULT=$(curl -s -f --header "PRIVATE-TOKEN: ${auth_token}" "$1" $2)
     if [ $? -eq 0 ]; then
         return $TRUE
     else
@@ -347,6 +345,21 @@ gitlab_api_query() {
     fi
 }
 
+dpkg_check_packages_installed() {
+    local installed="$(dpkg --list | grep '^ii' | awk '{print $2}')"
+    local missing_pkgs=""
+
+    for pkg in $@; do
+        if ! (echo "${installed}" | grep -E "^${pkg}\$" >/dev/null 2>&1); then
+            missing_pkgs="${missing_pkgs} ${pkg}"
+        fi
+    done
+
+    if ! [ -z "${missing_pkgs}" ]; then
+        elog "installing missing dependencies: ${missing_pkgs} (sudo)"
+        DEBIAN_FRONTEND="noninteractive" erunquiet sudo apt-get -y --no-install-recommends install ${missing_pkgs}
+    fi
+}
 
 assert_in() {
     local r=$FALSE
@@ -374,16 +387,34 @@ helper_is_dir_repo() {
     fi
 }
 
-install_bootstrap_depends() {
-    erunquiet sudo apt-get -y --no-install-recommends install p7zip-full git
+doh_check_bootstrap_depends() {
+    local deps="p7zip-full git python patch openssh-client"
+    local missing_pkg=""
+    local dpkg
+    local dexe
+    local dexe_path
+
+    dpkg_check_packages_installed $deps
+
+    if ! (dpkg --compare-versions "$(git --version | awk '{print $NF}')" ">=" "1.9"); then
+        die "please upgrade git version to at least 1.9
+    sudo apt-get install python-software-properties
+    sudo add-apt-repository ppa:git-core/ppa
+    sudo apt-get update
+    sudo apt-get install git
+"
+    fi
+
+    return $TRUE
 }
 
 doh_check_odoo_depends() {
     doh_profile_load
 
-    DEPENDS=$(sed -ne '/^Depends:/, /^[^ ]/{/^Depends:/{n;n};/^[^ ]/{q;};s/,$//;p;}' \
-        "${DIR_MAIN}/debian/control")
-    erunquiet sudo apt-get -y --no-install-recommends install ${DEPENDS}
+    DEPENDS=$(
+        sed -ne '/\(^Depends:\)/,/^[^ ]/{p}' ${DIR_MAIN}/debian/control \
+            | sed '1d; $d' | tr ',' '\n' | sed 's/^\s*\([^ ]*\).*/\1/; /^\$/d; /^$/d')
+    dpkg_check_packages_installed $DEPENDS
 }
 
 doh_git_ssh_handler() {
@@ -423,7 +454,7 @@ doh_gitlab_project_set_forked_from() {
     forked_project_id=$(echo "${GITLAB_API_RESULT}" | py_json_get_value "id")
 
     edebug "setting project '${2}' (id: ${project_id}) as forked from '${3}' (id: ${forked_project_id})"
-    gitlab_api_query "${api_url}/projects/${project_id}/fork/${forked_project_id}" "--method=POST"
+    gitlab_api_query "${api_url}/projects/${project_id}/fork/${forked_project_id}" "--request POST"
 }
 
 doh_fetch_file() {
@@ -432,12 +463,12 @@ doh_fetch_file() {
         die "Wrong number of parameters for 'doh_fetch_file'"
     fi
 
-    gitlab_url_match='^((http)[s]?://([^/]+)[/]?)((.*)/snippets/([0-9]|[^/]*).*)$'
+    gitlab_url_match='^((http)[s]?://([^/]+)[/]?)((.*)/snippets/([0-9]+|[^/]*).*)$'
     if [[ "${1}" =~ ${gitlab_url_match} ]]; then
         edebug "loading remote gitlab snippet from: ${1}"
         profile_baseloc="${BASH_REMATCH[1]}"
-        gitlab_project_name="${BASH_REMATCH[-2]}"
-        gitlab_snippet_id="${BASH_REMATCH[-1]}"
+        gitlab_project_name="${BASH_REMATCH[5]}"
+        gitlab_snippet_id="${BASH_REMATCH[6]}"
 
         local api_url="${profile_baseloc}api/v3"
 
@@ -463,29 +494,26 @@ doh_fetch_file() {
         return $TRUE
     elif [[ "${1}" =~ ^(http|ftp)[s]?://.* ]]; then
         edebug "loading remote file from: ${1}"
-        # wget + load file
-        wget -q -O "${2}" "${1}" || die 'Unable to fetch remote file'
+        # fetch + load file
+        (curl -s -f "${2}" > "${1}") || die 'Unable to fetch remote file'
         return $TRUE
     fi
     return $FALSE
 }
 
-install_postgresql_server() {
-    erunquiet sudo apt-get -y --no-install-recommends install postgresql
-}
-
 db_client_setup_env() {
+    # $1: postgresql env to set
     doh_profile_load
 
-    if [ x"$CONF_DB_HOST" != x"" ]; then
-        if [ x"$CONF_DB_USER" = x"" ]; then
-            die "Config parameter DB_USER is mandatory when using DB_HOST"
-        fi
-        if [ x"$CONF_DB_PASS" = x"" ]; then
-            die "Config parameter DB_PASS is mandatory when using DB_HOST"
-        fi
-    fi
-    for v in HOST PORT USER PASS; do
+    local pgvars_all="HOST PORT USER PASSWORD"
+    local pgvars="${1:-${pgvars_all}}"
+    local db_var
+    local pg_var
+
+    for v in ${pgvars_all}; do
+        unset "PG${var}"
+    done
+    for v in ${pgvars}; do
         db_var="CONF_DB_${v}"
         pg_var="PG${v}"
         if [ x"${!db_var}" != x"" ]; then
@@ -494,13 +522,21 @@ db_client_setup_env() {
     done
 }
 
-db_get_server_version() {
-    db_client_setup_env
-    echo -n $(psql -A -t -c 'SHOW server_version' postgres)
+db_get_server_is_local() {
+    # $1: database hostname
+    [[ "${CONF_DB_HOST}" =~ ^(|localhost|127.0.0.1)$ ]]
+    return $?
 }
 
 db_get_server_local_cmd() {
-    local v=$(db_get_server_version | cut -d'.' -f -2)
+    doh_profile_load
+
+    if ! db_get_server_is_local; then
+        echo "$1";
+        return $TRUE
+    fi
+    db_client_setup_env "PORT"
+    local v=$(sudo -u postgres psql -A -t -c 'SHOW server_version' postgres | cut -d'.' -f -2)
     local server_bin_path="/usr/lib/postgresql/${v}/bin"
 
     if [ -d "${server_bin_path}" ]; then
@@ -512,44 +548,66 @@ db_get_server_local_cmd() {
 }
 
 db_config_local_server() {
-    db_client_setup_env
+    doh_profile_load
 
-    ROLES=$(erun sudo -u postgres psql -Atc "SELECT rolname FROM pg_roles WHERE rolname = '$USER'" postgres)
-    ROLES_COUNT=$(echo $ROLES | sed '/^$/d' | wc -l)
-    if [ $ROLES_COUNT -eq 0 ]; then
-        elog "Creating PostgreSQL role for user $USER"
+    if db_get_server_is_local; then
+        edebug "configuring local database server"
 
-        CREATE_USER_ARGS="NOSUPERUSER CREATEDB NOCREATEROLE INHERIT LOGIN;"
-        if [ x"$DB_PASS" != x"" ]; then
-            CREATE_USER_ARGS="ENCRYPTED PASSWORD '${DB_PASS}' $CREATE_USER_ARGS"
+        # only export PGPORT environement
+        # - server is local (dont care about HOST)
+        # - running admin ops (dont care about USER PASS)
+        db_client_setup_env "PORT"
+
+        local psql_bin_path=$(db_get_server_local_cmd "psql")
+        local roles=$(sudo -u postgres ${psql_bin_path} -Atc "SELECT rolname FROM pg_roles WHERE rolname = '${CONF_DB_USER}'" postgres)
+        local roles_count=$(echo ${roles} | sed '/^$/d' | wc -l)
+
+        if [ ${roles_count} -eq 0 ]; then
+            elog "creating postgresql role for user: ${CONF_DB_USER}"
+
+            create_user_args="NOSUPERUSER CREATEDB NOCREATEROLE INHERIT LOGIN;"
+            if [ x"$DBPASS" != x"" ]; then
+                create_user_args="ENCRYPTED PASSWORD '${CONF_DB_PASSWORD}' ${create_user_args}"
+            fi
+            erunquiet sudo -u postgres ${psql_bin_path} -Atc "CREATE ROLE \"${CONF_DB_USER}\" ${create_user_args}" || die 'Unable to create database user'
         fi
-        erunquiet sudo -u postgres psql -Atc "CREATE ROLE $USER $CREATE_USER_ARGS" || die 'Unable to create database user'
     fi
 }
 
 doh_generate_server_config_file() {
     doh_profile_load
 
-    RUNAS="$USER"
     ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
     # ODOO_ADDONS_PATH="${DIR_ADDONS},${DIR_EXTRA}"
     ODOO_ADDONS_PATH="${DOH_ADDONS_PATH}"
 
-    elog "Generating Odoo config file"
-    cat <<EOF | erunquiet tee "${ODOO_CONF_FILE}"
-[addons]
+    elog "generating odoo config file"
+    cat <<EOF | erunquiet sudo tee "${ODOO_CONF_FILE}"
 [options]
 ; This is the password that allows database operations:
 ; admin_passwd = admin
 db_host = ${CONF_DB_HOST:-False}
 db_port = ${CONF_DB_PORT:-False}
 db_user = ${CONF_DB_USER}
-db_password = ${CONF_DB_PASS:-False}
+db_password = ${CONF_DB_PASSWORD:-False}
 addons_path = ${ODOO_ADDONS_PATH}
 EOF
-    elog "Fixing permissions for Odoo config file"
+
+    VARS=$(conf_file_get_options "${DIR_ROOT}/odoo.profile" "server")
+    if [ x"${VARS}" != x"" ]; then
+        elog "merging custom odoo config value from profile"
+        OLDIFS="${IFS}#"
+        IFS=$'\n'; while read -r var; do
+            var_name="${var%%=*}"
+            var_value="${var#*=}"
+            conf_file_set "${ODOO_CONF_FILE}" "options.${var_name}" "${var_value}"
+        done <<< "${VARS}"
+        IFS="$OLDIFS"
+    fi
+
+    elog "fixing permissions for odoo config file"
     erunquiet sudo chmod 640 "${ODOO_CONF_FILE}"
-    erunquiet sudo chown "${RUNAS}:adm" "${ODOO_CONF_FILE}"
+    erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_CONF_FILE}"
 }
 
 doh_generate_server_init_file() {
@@ -557,41 +615,30 @@ doh_generate_server_init_file() {
 
     ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
     ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
-    RUNAS="$USER"
+    ODOO_DAEMON="${DIR_MAIN}/bin/openerp-server"
 
-    TMPL_INIT_FILE="${DIR_MAIN}/debian/init"
-    if [ x"${CONF_PROFILE_VERSION:-8.0}" = x"6.0" ]; then
+    if [[ "${CONF_PROFILE_VERSION:-8.0}" =~ ^(6.0)$ ]]; then
         TMPL_INIT_FILE="${DIR_MAIN}/debian/openerp-server.init"
+        ODOO_DAEMON="${DIR_MAIN}/bin/openerp-server.py"
+    elif [[ "${CONF_PROFILE_VERSION:-8.0}" =~ ^(6.1|7.0)$ ]]; then
+        TMPL_INIT_FILE="${DIR_MAIN}/debian/openerp.init"
+    else # 8.0 and later
+        TMPL_INIT_FILE="${DIR_MAIN}/debian/init"
     fi
 
-    elog "Updating Odoo init script"
+    elog "updating odoo init script"
     sed \
-        -e "s#^DAEMON=.*\$#DAEMON=${DIR_MAIN}/openerp-server#" \
+        -e "s#^DAEMON=.*\$#DAEMON=${ODOO_DAEMON}#" \
         -e "s/^\\(NAME\\|DESC\\)=.*\$/\\1=${CONF_PROFILE_NAME}/" \
         -e "s#^CONFIG=.*\$#CONFIG=${ODOO_CONF_FILE}#" \
         -e "s#^LOGFILE=.*\$#LOGFILE=${ODOO_LOG_FILE}#" \
-        -e "s/^USER=.*\$/USER=${RUNAS}/" \
+        -e "s/^USER=.*\$/USER=${CONF_PROFILE_RUNAS}/" \
         -e "s#--pidfile /var/run/#--pidfile ${DIR_RUN}/#" \
+        -e "s#--config=[^ ]* #--config=${ODOO_CONF_FILE} #" \
+        -e "s#--logfile=[^ ]*#--logfile=${ODOO_LOG_FILE} #" \
         ${TMPL_INIT_FILE} | erunquiet sudo tee "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
+
     erunquiet sudo chmod 755 "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
-}
-
-doh_config_init() {
-    doh_profile_load
-
-    doh_generate_server_config_file
-    doh_generate_server_init_file
-
-    elog "Fixing permissions for Odoo log file"
-    erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
-    erunquiet sudo touch "${ODOO_LOG_FILE}"
-    erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
-    erunquiet sudo chown "${RUNAS}:adm" "${ODOO_LOG_FILE}"
-
-    if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
-        elog "Adding Odoo '${CONF_PROFILE_NAME}' to autostart"
-        erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
-    fi
 }
 
 py_json_get_value() {
@@ -631,6 +678,8 @@ doh_profile_load() {
         local profile_url="${profile}"
         profile="${DIR_ROOT}/odoo.profile"
         doh_fetch_file "${profile_url}" "${profile}" || die 'Unable to fetch remote profile'
+        sudo chmod 640 "${profile}"
+        sudo chown "$USER:adm" "${profile}"
 
     elif [ -f "${profile}" ]; then
         if [ ! "${profile}" -ef "${DIR_ROOT}/odoo.profile" ]; then
@@ -643,6 +692,9 @@ doh_profile_load() {
     OLDIFS="${IFS}"
     SECTIONS=$(conf_file_get_sections "${DIR_ROOT}/odoo.profile")
     for section in ${SECTIONS}; do
+        if [ x"${section}" = x"server" ]; then
+            continue  # server section contain only odoo-server.conf options
+        fi
         export CONF_${section^^}="1"  # mark section as present
         VARS=$(conf_file_get_options "${DIR_ROOT}/odoo.profile" "${section}")
         IFS=$'\n'; while read -r var; do
@@ -698,16 +750,78 @@ doh_profile_load() {
     done
     export DOH_ADDONS_PATH="${ADDONS_PATH}"
 
-    DOH_PROFILE_LOADED="1"
+    export CONF_PROFILE_RUNAS="${CONF_PROFILE_RUNAS:-${USER}}"
 
-    # fetch remote deploy-key if none local
-    if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ] && [ ! -e "${DIR_CONF}/deploy.key" ]; then
-        doh_check_dirs "DIR_CONF"
-        elog "fetching profile deploy-key"
-        doh_fetch_file "${CONF_PROFILE_DEPLOY_KEY}" "${DIR_CONF}/deploy.key"
-        chmod 0400 "${DIR_CONF}/deploy.key"
+    # check for db configuration
+    export CONF_DB_USER="${CONF_DB_USER:-${CONF_PROFILE_RUNAS}}"
+    export CONF_DB_PORT="${CONF_DB_PORT:-5432}"
+
+    if [ x"${CONF_DB_PASSWORD}" != x"" ] && [ x"${CONF_DB_HOST}" = x"" ]; then
+        CONF_DB_HOST="localhost"
+    fi
+    if [ x"${CONF_DB_USER}" != x"${CONF_PROFILE_RUNAS}" ] && [ x"${CONF_DB_HOST}" = x"" ]; then
+        die "please set db host in odoo.profile\n\
+    connecting to database local socket with a database user different from server's running user is not supported"
+    fi
+    if [ x"$CONF_DB_HOST" != x"" ]; then
+        if [ x"${CONF_DB_USER}" = x"" ]; then
+            die "Config parameter DB_USER is mandatory when using DB_HOST"
+        fi
+        if [ x"${CONF_DB_PASSWORD}" = x"" ]; then
+            die "Config parameter DB_PASSWORD is mandatory when using DB_HOST"
+        fi
     fi
 
+    DOH_PROFILE_LOADED="1"
+}
+
+doh_reconfigure() {
+    # $1: stage
+    doh_profile_load
+    doh_check_dirs
+
+    local stage="${1:-all}"
+
+    if [[ "${stage}" =~ ^(pre|all)$ ]]; then
+        doh_check_bootstrap_depends
+
+        # check run-as user
+        runas_entry=$(getent passwd "${CONF_PROFILE_RUNAS}")
+        if [ $? -ne 0 ]; then
+            elog "adding new system user '${CONF_PROFILE_RUNAS}' (sudo)"
+            erun sudo adduser --system --quiet --group "${CONF_PROFILE_RUNAS}"
+        fi
+
+        # fetch remote deploy-key if none local
+        if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ]; then
+            doh_check_dirs "DIR_CONF"
+            elog "fetching profile deploy-key"
+            touch "${DIR_CONF}/deploy.key"
+            chmod 0600 "${DIR_CONF}/deploy.key"
+            doh_fetch_file "${CONF_PROFILE_DEPLOY_KEY}" "${DIR_CONF}/deploy.key"
+        fi
+    fi
+
+    if [[ "${stage}" =~ ^(post|all) ]]; then
+        elog "installing odoo dependencies (sudo)"
+        doh_check_odoo_depends
+
+        db_config_local_server
+
+        doh_generate_server_config_file
+        doh_generate_server_init_file
+
+        elog "fixing permissions for odoo log file"
+        erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
+        erunquiet sudo touch "${ODOO_LOG_FILE}"
+        erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
+        erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_LOG_FILE}"
+
+        if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
+            elog "adding odoo '${CONF_PROFILE_NAME}' to autostart"
+            erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
+        fi
+    fi
 }
 
 doh_check_dirs() {
@@ -790,7 +904,7 @@ doh_update_section() {
         elog "fetching odoo extra modules"
         local extra_tmp=`mktemp`
         local extra_tmpdir=`mktemp -d`
-        erun wget -O "${extra_tmp}" "${CONF_EXTRA_URL}"
+        erun curl -s -f "${CONF_EXTRA_URL}" > "${extra_tmp}"
         elog "extracting odoo extra modules"
         erunquiet 7z x -y "-o${extra_tmpdir}" "${extra_tmp}"
         rm -Rf "${section_dir}"
@@ -822,7 +936,7 @@ doh_update_section() {
         pushd "${section_dir}"
         elog "fetching odoo patch"
         local patchset_tmp=`mktemp`
-        erunquiet wget -q -O "${patchset_tmp}" "${section_patchset}"
+        doh_fetch_file "${section_patchset}" "${patchset_tmp}"
         elog "apply odoo patch locally"
         erunquiet git -C "${section_dir}" apply "${patchset_tmp}"
         eremove "${patchset_tmp}"
@@ -834,7 +948,7 @@ doh_profile_update() {
     if [ x"${CONF_PROFILE_URL}" != x"" ]; then
         elog "updating odoo profile"
         tmp_profile=`mktemp`
-        erunquiet wget -q -O "${tmp_profile}" "${CONF_PROFILE_URL}" || die 'Unable to update odoo profile'
+        (erunquiet curl -s -f  "${CONF_PROFILE_URL}" > "${tmp_profile}") || die 'Unable to update odoo profile'
         mv "${tmp_profile}" "${DIR_ROOT}/odoo.profile"
     fi
 }
@@ -863,14 +977,19 @@ doh_run_server() {
     doh_check_dirs
 
     if [ ! -e "${DIR_CONF}/odoo-server.conf" ]; then
-        doh_generate_server_config_file
+        die "odoo server configuration file is missing, please re-run 'doh reconfigure'"
+    fi
+
+    local start=""
+    if [ x"${USER}" != x"${CONF_PROFILE_RUNAS}" ]; then
+	start="sudo -u ${CONF_PROFILE_RUNAS}"
     fi
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
-    if [ x"${v}" = x"8.0" ] || [ x"${v}" = x"7.0" ] || [ x"${v}" = x"master" ]; then
-        "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
-    elif [ x"${v}" = "6.1" ] || [ x"${v}" = x"6.0" ]; then
-        "${DIR_MAIN}/bin/openerp-server.py" -c "${DIR_CONF}/odoo-server.conf" "$@"
+    if [[ x"${v}" =~ ^x(8.0|7.0|master)$ ]]; then
+        ${start} "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
+    elif [[ x"${v}" =~ ^x(6.1|6.0)$ ]]; then
+        ${start} "${DIR_MAIN}/bin/openerp-server.py" -c "${DIR_CONF}/odoo-server.conf" "$@"
     else
         die "No known way to start server for version ${v}"
     fi
@@ -895,7 +1014,7 @@ doh_svc_is_running() {
     doh_profile_load
 
     PIDFILE="${DIR_RUN}/${CONF_PROFILE_NAME}.pid"
-    if [ ! -x "${PIDFILE}" ]; then
+    if [ ! -f "${PIDFILE}" ]; then
         # no pidfile, probably not running.
         # still make a 2nd check is ps directly
         PID=$(ps ax | grep "${DIR_MAIN}/openerp-server" | grep -v "grep" | awk '{print $1}')
@@ -906,7 +1025,6 @@ doh_svc_is_running() {
     fi
     PID=$(cat "${PIDFILE}")
     RUNNING=$(ps ax | sed 's/^[ ]//g' | grep "^${PID}")
-    echo "$RUNNING"
     if [ x"${RUNNING}" != x"" ]; then
         return 0
     fi
@@ -915,14 +1033,14 @@ doh_svc_is_running() {
 
 doh_svc_start() {
     if ! doh_svc_is_running; then
-        elog "Starting service: odoo-${CONF_PROFILE_NAME}"
+        elog "starting service: odoo-${CONF_PROFILE_NAME}"
         erunquiet sudo service "odoo-${CONF_PROFILE_NAME}" start
     fi
 }
 
 doh_svc_stop() {
     if doh_svc_is_running; then
-        elog "Stopping service: odoo-${CONF_PROFILE_NAME}"
+        elog "stopping service: odoo-${CONF_PROFILE_NAME}"
         erunquiet sudo service "odoo-${CONF_PROFILE_NAME}" stop
     fi
 }
@@ -938,22 +1056,29 @@ doh_svc_restart() {
 
 cmd_help() {
 : <<HELP_CMD_HELP
-Usage: doh [OPTS | COMMAND] [COMMANDS OPTS...]
+Usage: doh [OPTIONS] COMMAND [COMMANDS OPTS...]
 
-Availables standalone options
+Availables options
+
   --self-upgrade    self-update doh to latest version
   --version         display doh version
 
 Available commands
-  install    install and setup a new odoo instance
-  upgrade    upgrade odoo and extra modules
-  config     get and set odoo profile options
-  create-db  create a new database using current profile
-  drop-db    drop an existing database
-  upgrade-db upgrade a specific database
-  start      start odoo service
-  stop       stop odoo service
-  help       show this help message
+
+  install       install and setup a new odoo instance
+  update        update odoo and extra modules code
+  reconfigure   check and regenerate server/db configuration
+
+  help          show this help message
+  config        get and set odoo profile options
+
+  create-db     create a new database using current profile
+  drop-db       drop an existing database
+  copy-db       duplicate an existing database
+  upgrade-db    upgrade a specific database
+
+  start         start odoo service
+  stop          stop odoo service
 
 Use "doh help CMD" for detail about a specific command
 HELP_CMD_HELP
@@ -1013,8 +1138,7 @@ HELP_CMD_CONFIG
         cmd_help "config"
     fi
 
-    doh_profile_load
-    local conffile="${DIR_ROOT}/odoo.profile"
+    local conffile=$(doh_profile_find)
 
     if [ x"${listall}" = x"1" ]; then
         local SECTIONS=$(conf_file_get_sections "${conffile}")
@@ -1023,7 +1147,7 @@ HELP_CMD_CONFIG
         local opt_value=""
 
         for section in ${SECTIONS}; do
-            VARS=$(conf_file_get_options "${DIR_ROOT}/odoo.profile" "${section}")
+            VARS=$(conf_file_get_options "${conffile}" "${section}")
             IFS=$'\n'; while read -r var; do
                 [ x"${var}" = x"" ] && continue
                 opt_name="${var%%=*}"
@@ -1033,11 +1157,11 @@ HELP_CMD_CONFIG
             IFS="$OLDIFS"
         done
     elif [ x"${varunset}" = x"1" ]; then
-        conf_file_unset "${DIR_ROOT}/odoo.profile" "$1"
+        conf_file_unset "${conffile}" "$1"
     elif [ $# -ge 2 ]; then
-        conf_file_set "${DIR_ROOT}/odoo.profile" "$1" "$2"
+        conf_file_set "${conffile}" "$1" "$2"
     else
-        echo $(conf_file_get "${DIR_ROOT}/odoo.profile" "$1")
+        echo $(conf_file_get "${conffile}" "$1")
     fi
 }
 
@@ -1113,6 +1237,8 @@ name=${n_profile_name}
 version=${n_profile_version}
 autostart=${n_profile_autostart}
 url=${n_profile_update_url}
+#runas=
+#deploy_key=
 
 [main]
 repo=${n_main_repo}
@@ -1122,6 +1248,7 @@ patchset=
 # [extra]
 # repo=
 # url=
+# patchset=
 
 # [db]
 # host=
@@ -1130,6 +1257,9 @@ patchset=
 # pass=
 # init_modules_on_create=base
 # init_extra_args=
+#
+# [server]
+# xmlrpc_port=
 
 TMPL_ODOO_PROFILE
 }
@@ -1149,16 +1279,18 @@ HELP_CMD_INSTALL
     local profdir=""
     local profname=""
     local template=""
+    local local_database
+    local autostart
     OPTIND=1
     while getopts "dat:p:" opt; do
         case $opt in
             d)
                 # Install and use local database
-                local local_database=true
+                local_database=true
                 ;;
             a)
                 # Autostart profile on boot
-                local autostart=true
+                autostart=true
                 ;;
             p)
                 profname="${OPTARG}"
@@ -1196,28 +1328,25 @@ HELP_CMD_INSTALL
         CONF_PROFILE_AUTOSTART="1"
     fi
 
-    # ensure all directories exists
-    doh_check_dirs
+    # force local database setup in profile db.host is empty
+    if db_get_server_is_local; then
+        local_database=true
+    fi
 
-    elog 'installing prerequisite dependencies (sudo)'
-    install_bootstrap_depends
+    doh_reconfigure "pre"
 
     elog "fetching odoo from remote git repository (this can take some time...)"
     for part in $DOH_PARTS; do
         doh_update_section "${part}"
     done
 
-    elog "installing odoo dependencies (sudo)"
-    doh_check_odoo_depends
-
     if [ x"$local_database" = x"true" ]; then
         elog "installing postgresql server (sudo)"
-        install_postgresql_server
+        dpkg_check_packages_installed "postgresql"
         erunquiet sudo service postgresql start || die 'PostgreSQL server doesnt seems to be running'
-        db_config_local_server
     fi
 
-    doh_config_init
+    doh_reconfigure "post"
 
     if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
         elog "starting odoo (sudo)"
@@ -1234,6 +1363,9 @@ cmd_upgrade() {
 doh upgrade [DATABASE ...]
 HELP_CMD_UPGRADE
 
+    ewarn "command 'upgrade' is deprecated"
+    ewarn "please use command 'update', then followed by command 'upgrade-db'"
+
     doh_profile_load
     doh_profile_update
     doh_check_dirs
@@ -1247,6 +1379,29 @@ HELP_CMD_UPGRADE
             cmd_upgrade_db "${db}"
         done
     fi
+}
+
+cmd_update() {
+: <<HELP_CMD_UPGRADE
+doh update
+HELP_CMD_UPGRADE
+
+    doh_profile_load
+    doh_profile_update
+    doh_check_dirs
+
+    for part in $DOH_PARTS; do
+        doh_update_section "${part}"
+    done
+}
+
+cmd_reconfigure() {
+: <<HELP_CMD_RECONFIGURE
+doh reconfigure
+HELP_CMD_RECONFIGURE
+
+    doh_profile_load
+    doh_reconfigure
 }
 
 cmd_create_db() {
@@ -1385,22 +1540,64 @@ HELP_CMD_STOP
     doh_svc_stop
 }
 
-if [ x"${GIT_INTERNAL_GETTEXT_SH_SCHEME}" != x"" ] && [ x"${GIT_SSH}" = x"$0" ]; then
-    # special case when calling our-self as GIT_SSH handler
+# special case when calling our-self as GIT_SSH handler
+ppid_exe=$(readlink /proc/$PPID/exe)
+if [ $? -ne 0 ] && [ x"${GIT_INTERNAL_GETTEXT_SH_SCHEME}" != x"" ]; then
+    # reading exe link might fail when running in container, fallback to env identification
+    ppid_exe=$(which git)
+fi
+ppid_name=$(basename "${ppid_exe}")
+if [ x"${GIT_SSH}" = x"$0" ] && [ x"${ppid_name}" = x"git" ]; then
     doh_git_ssh_handler "$@";
     exit 0;
 fi
 
+if [ x"${USER}" = x"" ]; then
+    # no user defined in env
+    USER=$(getent passwd $UID | cut -d: -f1)
+fi
+
+# stage 0 dependencies
+stage_0_missing=0
+for exe in sudo curl; do
+    exe_path=$(which "${exe}")
+    if [ $? -ne 0 ]; then
+        eerror 'please install ${exe} before starting/installing doh'
+        stage_0_missing=1
+    fi
+done
+[[ x"${stage_0_missing}" = x"1" ]] && exit 2;
+
+
 CMD="$1"; shift;
 case $CMD in
-    internal-self-upgrade|--self-upgrade)
-        # TOOD: add self-upgrading function
-        elog "Going to upgrade doh (path: $0) with remote version, press ENTER to continue or Ctrl-C to cancel"
-        read ok
+    internal-self-upgrade|--self-upgrade|--install)
+        doh_path="$0"
+        if [ x"${CMD}" = x"--install" ] || [ x"${0}" = x"bash" ]; then
+            doh_path="/usr/local/bin/doh"
+        fi
+
+        if [ -e "${doh_path}" ] && [ -t 0 ]; then
+            # ask user about upgrading
+            while true; do
+                read -p "update doh (at ${doh_path}) with new version [y/n] " REPLY;
+                if [ x"${REPLY}" = x"n" ]; then
+                    exit 0;
+                fi
+                if [ x"${REPLY}" = x"y" ]; then
+                    break;
+                fi
+            done
+        fi
+
         tmp_doh=`mktemp`
-        wget -q -O "${tmp_doh}" "https://raw.githubusercontent.com/xavieralt/doh/master/doh" || die 'Unable to fetch remote doh'
-        (cat "${tmp_doh}" | sudo tee "$0" >/dev/null) || die 'Unable to update doh'
-        sudo chmod 755 "$0"  # ensure script is executable
+        doh_branch="${1:-master}"
+        (curl -s -f "https://raw.githubusercontent.com/xavieralt/doh/${doh_branch}/doh" >  "${tmp_doh}") || die 'Unable to fetch remote doh'
+        (cat "${tmp_doh}" | sudo tee "${doh_path}" >/dev/null) || die 'Unable to update doh'
+        sudo chmod 755 "${doh_path}"  # ensure script is executable
+
+        # check bootstrap depends might fail, testing that as end
+        doh_check_bootstrap_depends
         exit 0
         ;;
     --version)
@@ -1408,6 +1605,7 @@ case $CMD in
         ;;
     *)
         doh_setup_logging
+        doh_check_bootstrap_depends
         if [ x"$CMD" != x"" ]; then
             CMD_FUNC="cmd_${CMD//-/_}"
             CMD_TYPE=$(type -t "$CMD_FUNC")
