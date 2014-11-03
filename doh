@@ -1074,6 +1074,7 @@ Available commands
 
   create-db     create a new database using current profile
   drop-db       drop an existing database
+  copy-db       duplicate an existing database
   upgrade-db    upgrade a specific database
 
   start         start odoo service
