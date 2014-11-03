@@ -466,8 +466,8 @@ doh_fetch_file() {
     if [[ "${1}" =~ ${gitlab_url_match} ]]; then
         edebug "loading remote gitlab snippet from: ${1}"
         profile_baseloc="${BASH_REMATCH[1]}"
-        gitlab_project_name="${BASH_REMATCH[-2]}"
-        gitlab_snippet_id="${BASH_REMATCH[-1]}"
+        gitlab_project_name="${BASH_REMATCH[5]}"
+        gitlab_snippet_id="${BASH_REMATCH[6]}"
 
         local api_url="${profile_baseloc}api/v3"
 
