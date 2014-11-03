@@ -635,6 +635,7 @@ doh_generate_server_init_file() {
         -e "s/^USER=.*\$/USER=${CONF_PROFILE_RUNAS}/" \
         -e "s#--pidfile /var/run/#--pidfile ${DIR_RUN}/#" \
         -e "s#--config=[^ ]* #--config=${ODOO_CONF_FILE} #" \
+        -e "s#--logfile=[^ ]*#--logfile=${ODOO_LOG_FILE} #" \
         ${TMPL_INIT_FILE} | erunquiet sudo tee "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
 
     erunquiet sudo chmod 755 "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
