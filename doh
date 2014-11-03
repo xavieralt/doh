@@ -283,7 +283,7 @@ gitlab_cache_auth_token() {
         local session_url="$1/api/v3/session"
         gitlab_username=$(echo "${gitlab_username}" | urlencode)
         gitlab_password=$(echo "${gitlab_password}" | urlencode)
-        local session=$(wget -q -O- "${session_url}" --post-data "login=${gitlab_username}&password=${gitlab_password}")
+        local session=$(curl -s -f "${session_url}" --data "login=${gitlab_username}&password=${gitlab_password}")
         if [ x"${session}" = x"" ]; then
             eerror 'Unable to authenticate to gitlab (wrong password?)'
             return $FALSE
@@ -318,7 +318,7 @@ gitlab_extract_baseurl() {
 gitlab_identify_site() {
     gitlab_url=$(gitlab_extract_baseurl "$1") || return $FALSE
     session_url="${gitlab_url}/api/v3/session"
-    session_url_status=$(wget -O- -S -q "${session_url}" 2>&1 | sed -n '/\s*HTTP/{s#\s*HTTP\/.\.. \([0-9]*\) .*#\1#; p; q};')
+    session_url_status=$(curl -s --dump-header - "${session_url}" 2>&1 | sed -n '/\s*HTTP/{s#\s*HTTP\/.\.. \([0-9]*\) .*#\1#; p; q};')
     if [ x"$session_url_status" = x"405" ]; then
         return $TRUE
     else
@@ -328,7 +328,7 @@ gitlab_identify_site() {
 
 gitlab_api_query() {
     # $1: gitlab url
-    # $2: wget extra args
+    # $2: curl extra args
     gitlab_url=$(gitlab_extract_baseurl "$1")
     if [ $? -ne 0 ]; then
         die "Unable to extract Gitlab base url from $1"
@@ -337,7 +337,7 @@ gitlab_api_query() {
     gitlab_cache_auth_token "${gitlab_url}" || die "Unable to get authentication token"
     auth_token="${GITLAB_CACHED_AUTH_TOKENS[${gitlab_url}]}"
 
-    GITLAB_API_RESULT=$(wget -q -O- --header "PRIVATE-TOKEN: ${auth_token}" "$1" $2)
+    GITLAB_API_RESULT=$(curl -s -f --header "PRIVATE-TOKEN: ${auth_token}" "$1" $2)
     if [ $? -eq 0 ]; then
         return $TRUE
     else
@@ -453,7 +453,7 @@ doh_gitlab_project_set_forked_from() {
     forked_project_id=$(echo "${GITLAB_API_RESULT}" | py_json_get_value "id")
 
     edebug "setting project '${2}' (id: ${project_id}) as forked from '${3}' (id: ${forked_project_id})"
-    gitlab_api_query "${api_url}/projects/${project_id}/fork/${forked_project_id}" "--method=POST"
+    gitlab_api_query "${api_url}/projects/${project_id}/fork/${forked_project_id}" "--request POST"
 }
 
 doh_fetch_file() {
@@ -493,8 +493,8 @@ doh_fetch_file() {
         return $TRUE
     elif [[ "${1}" =~ ^(http|ftp)[s]?://.* ]]; then
         edebug "loading remote file from: ${1}"
-        # wget + load file
-        wget -q -O "${2}" "${1}" || die 'Unable to fetch remote file'
+        # fetch + load file
+        (curl -s -f "${2}" > "${1}") || die 'Unable to fetch remote file'
         return $TRUE
     fi
     return $FALSE
@@ -899,7 +899,7 @@ doh_update_section() {
         elog "fetching odoo extra modules"
         local extra_tmp=`mktemp`
         local extra_tmpdir=`mktemp -d`
-        erun wget -O "${extra_tmp}" "${CONF_EXTRA_URL}"
+        erun curl -s -f "${CONF_EXTRA_URL}" > "${extra_tmp}"
         elog "extracting odoo extra modules"
         erunquiet 7z x -y "-o${extra_tmpdir}" "${extra_tmp}"
         rm -Rf "${section_dir}"
@@ -943,7 +943,7 @@ doh_profile_update() {
     if [ x"${CONF_PROFILE_URL}" != x"" ]; then
         elog "updating odoo profile"
         tmp_profile=`mktemp`
-        erunquiet wget -q -O "${tmp_profile}" "${CONF_PROFILE_URL}" || die 'Unable to update odoo profile'
+        (erunquiet curl -s -f  "${CONF_PROFILE_URL}" > "${tmp_profile}") || die 'Unable to update odoo profile'
         mv "${tmp_profile}" "${DIR_ROOT}/odoo.profile"
     fi
 }
@@ -1549,7 +1549,7 @@ fi
 
 # stage 0 dependencies
 stage_0_missing=0
-for exe in sudo wget; do
+for exe in sudo curl; do
     exe_path=$(which "${exe}")
     if [ $? -ne 0 ]; then
         eerror 'please install ${exe} before starting/installing doh'
@@ -1582,7 +1582,7 @@ case $CMD in
 
         tmp_doh=`mktemp`
         doh_branch="${1:-master}"
-        wget -q -O "${tmp_doh}" "https://raw.githubusercontent.com/xavieralt/doh/${doh_branch}/doh" || die 'Unable to fetch remote doh'
+        (curl -s -f "https://raw.githubusercontent.com/xavieralt/doh/${doh_branch}/doh" >  "${tmp_doh}") || die 'Unable to fetch remote doh'
         (cat "${tmp_doh}" | sudo tee "${doh_path}" >/dev/null) || die 'Unable to update doh'
         sudo chmod 755 "${doh_path}"  # ensure script is executable
 
