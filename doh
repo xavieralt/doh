@@ -582,7 +582,6 @@ doh_generate_server_config_file() {
 
     elog "generating odoo config file"
     cat <<EOF | erunquiet sudo tee "${ODOO_CONF_FILE}"
-[addons]
 [options]
 ; This is the password that allows database operations:
 ; admin_passwd = admin
@@ -615,9 +614,11 @@ doh_generate_server_init_file() {
 
     ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
     ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
+    ODOO_DAEMON="${DIR_MAIN}/bin/openerp-server"
 
     if [[ "${CONF_PROFILE_VERSION:-8.0}" =~ ^(6.0)$ ]]; then
         TMPL_INIT_FILE="${DIR_MAIN}/debian/openerp-server.init"
+        ODOO_DAEMON="${DIR_MAIN}/bin/openerp-server.py"
     elif [[ "${CONF_PROFILE_VERSION:-8.0}" =~ ^(6.1|7.0)$ ]]; then
         TMPL_INIT_FILE="${DIR_MAIN}/debian/openerp.init"
     else # 8.0 and later
@@ -626,13 +627,15 @@ doh_generate_server_init_file() {
 
     elog "updating odoo init script"
     sed \
-        -e "s#^DAEMON=.*\$#DAEMON=${DIR_MAIN}/openerp-server#" \
+        -e "s#^DAEMON=.*\$#DAEMON=${TMPL_DAEMON}#" \
         -e "s/^\\(NAME\\|DESC\\)=.*\$/\\1=${CONF_PROFILE_NAME}/" \
         -e "s#^CONFIG=.*\$#CONFIG=${ODOO_CONF_FILE}#" \
         -e "s#^LOGFILE=.*\$#LOGFILE=${ODOO_LOG_FILE}#" \
         -e "s/^USER=.*\$/USER=${CONF_PROFILE_RUNAS}/" \
         -e "s#--pidfile /var/run/#--pidfile ${DIR_RUN}/#" \
+        -e "s#--config=[^ ]* #--config=${ODOO_CONF_FILE} #" \
         ${TMPL_INIT_FILE} | erunquiet sudo tee "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
+
     erunquiet sudo chmod 755 "/etc/init.d/odoo-${CONF_PROFILE_NAME}"
 }
 
@@ -975,11 +978,16 @@ doh_run_server() {
         die "odoo server configuration file is missing, please re-run 'doh reconfigure'"
     fi
 
+    local start=""
+    if [ x"${USER}" != x"${CONF_PROFILE_RUNAS}" ]; then
+	start="sudo -u ${CONF_PROFILE_RUNAS}"
+    fi
+
     local v="${CONF_PROFILE_VERSION:-8.0}"
     if [[ x"${v}" =~ ^x(8.0|7.0|master)$ ]]; then
-        "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
+        ${start} "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
     elif [[ x"${v}" =~ ^x(6.1|6.0)$ ]]; then
-        "${DIR_MAIN}/bin/openerp-server.py" -c "${DIR_CONF}/odoo-server.conf" "$@"
+        ${start} "${DIR_MAIN}/bin/openerp-server.py" -c "${DIR_CONF}/odoo-server.conf" "$@"
     else
         die "No known way to start server for version ${v}"
     fi
