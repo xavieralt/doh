@@ -628,7 +628,7 @@ doh_generate_server_init_file() {
 
     elog "updating odoo init script"
     sed \
-        -e "s#^DAEMON=.*\$#DAEMON=${TMPL_DAEMON}#" \
+        -e "s#^DAEMON=.*\$#DAEMON=${ODOO_DAEMON}#" \
         -e "s/^\\(NAME\\|DESC\\)=.*\$/\\1=${CONF_PROFILE_NAME}/" \
         -e "s#^CONFIG=.*\$#CONFIG=${ODOO_CONF_FILE}#" \
         -e "s#^LOGFILE=.*\$#LOGFILE=${ODOO_LOG_FILE}#" \
