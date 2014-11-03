@@ -1013,7 +1013,7 @@ doh_svc_is_running() {
     doh_profile_load
 
     PIDFILE="${DIR_RUN}/${CONF_PROFILE_NAME}.pid"
-    if [ ! -x "${PIDFILE}" ]; then
+    if [ ! -f "${PIDFILE}" ]; then
         # no pidfile, probably not running.
         # still make a 2nd check is ps directly
         PID=$(ps ax | grep "${DIR_MAIN}/openerp-server" | grep -v "grep" | awk '{print $1}')
@@ -1024,7 +1024,6 @@ doh_svc_is_running() {
     fi
     PID=$(cat "${PIDFILE}")
     RUNNING=$(ps ax | sed 's/^[ ]//g' | grep "^${PID}")
-    echo "$RUNNING"
     if [ x"${RUNNING}" != x"" ]; then
         return 0
     fi
