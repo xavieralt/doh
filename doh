@@ -411,8 +411,9 @@ doh_check_bootstrap_depends() {
 doh_check_odoo_depends() {
     doh_profile_load
 
-    DEPENDS=$(sed -ne '/^Depends:/, /^[^ ]/{/^Depends:/{n;n};/^[^ ]/{q;};s/,$//;p;}' \
-        "${DIR_MAIN}/debian/control")
+    DEPENDS=$(
+        sed -ne '/\(^Depends:\)/,/^[^ ]/{p}' ${DIR_MAIN}/debian/control \
+            | sed '1d; $d' | tr ',' '\n' | sed 's/^\s*\([^ ]*\).*/\1/; /^\$/d; /^$/d')
     dpkg_check_packages_installed $DEPENDS
 }
 
