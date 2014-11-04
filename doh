@@ -916,7 +916,7 @@ doh_update_section() {
         fi
 
         erun git -C "${section_dir}" checkout -f . # remove local changes
-        erun --show git -C "${section_dir}" fetch -f origin "${section_branch}" || die 'Unable to fetch git repository'
+        erun --show git -C "${section_dir}" -c "credential.helper=cache" fetch -f origin "${section_branch}" || die 'Unable to fetch git repository'
         erun git -C "${section_dir}" checkout -f "${section_branch}"
 
         unset GIT_SSH
