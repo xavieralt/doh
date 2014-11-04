@@ -613,6 +613,10 @@ EOF
 doh_generate_server_init_file() {
     doh_profile_load
 
+    if [ "${CONF_PROFILE_INITRC:-1}" -eq 0 ]; then
+        return $FALSE
+    fi
+
     ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
     ODOO_CONF_FILE="${DIR_CONF}/odoo-server.conf"
     ODOO_DAEMON="${DIR_MAIN}/openerp-server"
@@ -803,7 +807,6 @@ doh_reconfigure() {
     fi
 
     if [[ "${stage}" =~ ^(post|all) ]]; then
-        elog "installing odoo dependencies (sudo)"
         doh_check_odoo_depends
 
         db_config_local_server
@@ -812,12 +815,13 @@ doh_reconfigure() {
         doh_generate_server_init_file
 
         elog "fixing permissions for odoo log file"
+        ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
         erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
         erunquiet sudo touch "${ODOO_LOG_FILE}"
         erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
         erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_LOG_FILE}"
 
-        if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ]; then
+        if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ] && [ "${CONF_PROFILE_INITRC:-1}" -ne 0 ]; then
             elog "adding odoo '${CONF_PROFILE_NAME}' to autostart"
             erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
         fi
@@ -895,7 +899,7 @@ doh_update_section() {
         fi
 
         erun git -C "${section_dir}" checkout -f . # remove local changes
-        erun --show git -C "${section_dir}" pull -f origin "${section_branch}" || die 'Unable to fetch git repository'
+        erun --show git -C "${section_dir}" fetch -f origin "${section_branch}" || die 'Unable to fetch git repository'
         erun git -C "${section_dir}" checkout -f "${section_branch}"
 
         unset GIT_SSH
