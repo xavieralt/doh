@@ -1583,7 +1583,7 @@ stage_0_missing=0
 for exe in sudo curl; do
     exe_path=$(which "${exe}")
     if [ $? -ne 0 ]; then
-        eerror 'please install ${exe} before starting/installing doh'
+        eerror "please install ${exe} before starting/installing doh"
         stage_0_missing=1
     fi
 done
