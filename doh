@@ -411,10 +411,27 @@ doh_check_bootstrap_depends() {
 doh_check_odoo_depends() {
     doh_profile_load
 
-    DEPENDS=$(
-        sed -ne '/\(^Depends:\)/,/^[^ ]/{p}' ${DIR_MAIN}/debian/control \
-            | sed '1d; $d' | tr ',' '\n' | sed 's/^\s*\([^ ]*\).*/\1/; /^\$/d; /^$/d')
-    dpkg_check_packages_installed $DEPENDS
+    local depend_parts="MAIN"
+    if [ x"${CONF_CLIENT}" = x"1" ]; then
+        depend_parts="${depend_parts} CLIENT"
+    fi
+
+    for p in ${depend_parts}; do
+        elog "checking ${p,,} dependencies"
+        pdir="DIR_${p}"
+        pextra_depends="CONF_${p}_EXTRADEPENDS"
+
+        DEPENDS=$(
+            sed -ne '/\(^Depends:\)/,/^[^ ]/{p}' ${!pdir}/debian/control \
+                | sed '1d; $d' | tr ',' '\n' | sed 's/^\s*\([^ ]*\).*/\1/; /^\$/d; /^$/d')
+
+        if [ x"${!pextra_depends}" != x"" ]; then
+            DEPENDS="$DEPENDS ${!pextra_depends}"
+        fi
+
+        dpkg_check_packages_installed $DEPENDS
+
+    done
 }
 
 doh_git_ssh_handler() {
