@@ -1096,10 +1096,19 @@ Available commands
   help          show this help message
   config        get and set odoo profile options
 
+Database commands
+
   create-db     create a new database using current profile
   drop-db       drop an existing database
   copy-db       duplicate an existing database
   upgrade-db    upgrade a specific database
+
+Development commands:
+
+  run           run odoo server in foreground
+  coverage      run odoo server in coverage mode
+
+Service commands
 
   start         start odoo service
   stop          stop odoo service
