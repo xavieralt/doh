@@ -1009,8 +1009,10 @@ doh_run_server() {
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
     if [[ x"${v}" =~ ^x(8.0|7.0|master)$ ]]; then
+        edebug "Starting server using: ${start} ${DIR_MAIN}/openerp-server -c ${DIR_CONF}/odoo-server.conf $@"
         ${start} "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
     elif [[ x"${v}" =~ ^x(6.1|6.0)$ ]]; then
+        edebug "Starting server using: ${start} ${DIR_MAIN}/bin/openerp-server.py -c ${DIR_CONF}/odoo-server.conf $@"
         ${start} "${DIR_MAIN}/bin/openerp-server.py" -c "${DIR_CONF}/odoo-server.conf" "$@"
     else
         die "No known way to start server for version ${v}"
@@ -1443,7 +1445,7 @@ HELP_CMD_CREATE_DB
     elog "creating database ${DB}"
     erunquiet "${createdb}" -E unicode "${DB}" || die "Unable to create database ${DB}"
     elog "initializing database ${DB} for odoo"
-    erunquiet doh_run_server -d "${DB}" --stop-after-init -i "${CONF_DB_INIT_MODULES_ON_CREATE:-base}" ${CONF_DB_INIT_EXTRA_ARGS} || die "Failed to initialize database ${DB}"
+    erun --show doh_run_server -d "${DB}" --stop-after-init -i "${CONF_DB_INIT_MODULES_ON_CREATE:-base}" ${CONF_DB_INIT_EXTRA_ARGS} || die "Failed to initialize database ${DB}"
     elog "database ${DB} created successfully"
 }
 
