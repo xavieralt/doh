@@ -1485,7 +1485,7 @@ HELP_CMD_COPY_DB
     db_client_setup_env
     doh_svc_stop
     elog "copying database ${TMPL_DB} to ${DB}"
-    erunquiet "${psql}" postgres -c "CREATE DATABASE ${DB} ENCODING 'unicode' TEMPLATE ${TMPL_DB}" || die "Unable to copy database ${TMPL_DB} to ${DB}"
+    erunquiet "${psql}" postgres -c "CREATE DATABASE \"${DB}\" ENCODING 'unicode' TEMPLATE \"${TMPL_DB}\"" || die "Unable to copy database ${TMPL_DB} to ${DB}"
 }
 
 cmd_upgrade_db() {
