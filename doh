@@ -1531,6 +1531,105 @@ HELP_CMD_CLIENT
     doh_run_client_gtk "$@"
 }
 
+cmd_coverage() {
+: <<HELP_CMD_COVERAGE
+doh coverage DATABASE [all|module,...]
+
+Run server with coverage (information are collected under directory "run/coverage")
+
+HELP_CMD_COVERAGE
+
+    doh_profile_load
+    # dpkg_check_packages_installed "python-coverage"
+    local run_in_foreground="0"
+    if [ x"$1" = x"-f" ]; then
+        run_in_foreground="1"
+        shift;
+    fi
+
+    local COVERAGE_ARGS=""
+    local DB="$1"
+    local MODS="$2"
+    local MODS_REGEXP=""
+    local mpath=""
+
+    if [ x"${MODS}" = x"" ]; then
+        MODS=${CONF_COVERAGE_MODULES:-all}
+        elog "No modules specified, using config default: ${MODS}"
+    fi
+
+    if [ x"${MODS}" != x"all" ]; then
+        OLDIFS="${IFS}";
+        IFS=","; for m in ${MODS}; do
+            mpath=""
+            for a in $DOH_ADDONS_PATH; do
+                if [ -d "${a}/${m}" ]; then
+                    mpath="${a}/${m}"
+                    break
+                fi
+            done
+            if [ x"${mpath}" = x"" ]; then
+                die "Unable to find location of module: $m"
+            fi
+
+            if [ x"${MODS_REGEXP}" != x"" ]; then
+                MODS_REGEXP="${MODS_REGEXP},"
+            fi
+            MODS_REGEXP="${MODS_REGEXP}${a}/${m}/*"
+        done
+        IFS="${OLDIFS}"
+        COVERAGE_ARGS="--include=${MODS_REGEXP} --omit=*/__init__.py,*/__openerp__.py,*/tests/*.py"
+    fi
+
+    rm -Rf "${DIR_RUN}/coverage"
+    mkdir -p "${DIR_RUN}/coverage"
+    local logfile="${DIR_RUN}/coverage/odoo.log"
+
+    local v="${CONF_PROFILE_VERSION:-8.0}"
+    if [[ x"${v}" =~ ^x(8.0|7.0|master)$ ]]; then
+        edebug "Coverage server using: ${start} ${DIR_MAIN}/openerp-server -c ${DIR_CONF}/odoo-server.conf $@"
+        if [ x"${run_in_foreground}" = x"1" ]; then
+            exec 1>&6 6>&-
+            exec 2>&7 7>&-
+        else
+            exec > >(tee "${logfile}")
+            exec 2> >(tee "${logfile}" >&2)
+        fi
+        coverage run --branch --source="${DOH_ADDONS_PATH}" \
+            "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" \
+                --test-enable --log-level test --stop-after-init \
+                -d "${DB}" -u "${MODS}"
+        # restore initial config
+        exec > >(tee -a "${DOH_LOGFILE}")
+        exec 2> >(tee -a "${DOH_LOGFILE}" >&2)
+    elif [[ x"${v}" =~ ^x(6.1|6.0)$ ]]; then
+        die "Coverage is not active for 6.x odoo releases"
+        # edebug "Coverage server using: ${start} ${DIR_MAIN}/bin/openerp-server.py -c ${DIR_CONF}/odoo-server.conf $@"
+        # ${start} "${DIR_MAIN}/bin/openerp-server.py" -c "${DIR_CONF}/odoo-server.conf" "$@"
+    else
+        die "No known way to start server for version ${v}"
+    fi
+
+    if [ x"${run_in_foreground}" = x"1" ]; then
+        elog "Not generating html report, coverage was run in foreground and thus not logfile available"
+    else
+        elog "Generating html report"
+        exec 1>&6 6>&-
+        exec 2>&7 7>&-
+        coverage html ${COVERAGE_ARGS} -d "${DIR_RUN}/coverage"
+
+        grep -P "^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ (?:ERROR|CRITICAL) )|(?:Traceback \(most recent call last\):)$" ${DIR_RUN}/coverage/odoo.log>/dev/null
+        if [ $? -eq 0 ]; then
+            elog "Some errors occurreds, see below"
+            grep -P "^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ (?:ERROR|CRITICAL) )|(?:Traceback \(most recent call last\):)$" ${DIR_RUN}/coverage/odoo.log
+        fi
+    fi
+    # exec 1>&6 6>&-
+    # exec 2>&7 7>&-
+    # doh_run_server -d "$1" -u "$2"
+
+}
+
 cmd_start() {
 : <<HELP_CMD_START
 doh start [-f]
