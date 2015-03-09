@@ -1630,16 +1630,32 @@ HELP_CMD_COVERAGE
 
 }
 
+cmd_run() {
+: <<HELP_CMD_RUN
+doh run [ODOO OPTION...]
+
+Run odoo server in foreground with choosen options.
+
+HELP_CMD_RUN
+    doh_profile_load
+
+    # set stdout/stderr to terminal pty
+    exec 1>&6 6>&-
+    exec 2>&7 7>&-
+    doh_run_server "$@"
+}
+
 cmd_start() {
 : <<HELP_CMD_START
-doh start [-f]
+doh start [-f] [ODOO OPTION...]
 
 options:
 
- -f   start server in foreground
+ -f   start server in foreground (deprecated)
 HELP_CMD_START
 
     if [ x"$1" = x"-f" ]; then
+        ewarn "command 'start -f' is deprecated, please use 'run' command instead!"
         run_in_foreground="1"
 	shift
     fi
