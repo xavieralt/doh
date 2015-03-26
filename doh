@@ -1916,7 +1916,7 @@ case $CMD in
                 case $yn in
                     [yY]* ) break;;
                     [nN]* ) exit 2;;
-                    * ) echo "please choose Y or N"
+                    * ) echo "please choose Y or N";;
                 esac
             done
         fi
