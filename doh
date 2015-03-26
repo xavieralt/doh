@@ -7,6 +7,7 @@ DOH_LOGFILE=/tmp/doh.log
 DOH_LOGLEVEL="${DOH_LOGLEVEL:-info}"
 DOH_PROFILE_LOADED="0"
 DOH_PARTS="main addons extra client"
+DOH_USER_GLOBAL_CONFIG="$HOME/.config/doh"
 
 # HELPERS GLOBALS
 declare -A GITLAB_CACHED_AUTH_TOKENS
@@ -684,6 +685,11 @@ doh_profile_load() {
         return
     fi
 
+    local user_profile_only="0"
+    if [ x"$1" = x"--user-profile-only" ]; then
+        user_profile_only="1"
+    fi
+
     # $1: odoo.profile
     export DIR_ROOT="${PWD}"
     export DIR_MAIN="${PWD}/main"
@@ -693,6 +699,32 @@ doh_profile_load() {
     export DIR_CONF="${PWD}/conf"
     export DIR_LOGS="${PWD}/logs"
     export DIR_RUN="${PWD}/run"
+
+    # load user global config
+    if [ -f "${DOH_USER_GLOBAL_CONFIG}" ]; then
+        edebug "loading user global profile"
+        OLDIFS="${IFS}"
+        SECTIONS=$(conf_file_get_sections "${DOH_USER_GLOBAL_CONFIG}")
+        for section in ${SECTIONS}; do
+            if [ x"${section}" = x"server" ]; then
+                continue  # server section contain only odoo-server.conf options
+            fi
+            export CONF_${section^^}="1"  # mark section as present
+            VARS=$(conf_file_get_options "${DOH_USER_GLOBAL_CONFIG}" "${section}")
+            IFS=$'\n'; while read -r var; do
+                var_name="${var%%=*}"
+                var_value="${var#*=}"
+                export CONF_${section^^}_${var_name^^}="${var_value}"
+            done <<< "${VARS}"
+            IFS="$OLDIFS"
+        done
+    fi
+
+    if [ x"${user_profile_only}" = x"1" ]; then
+        # do not try to load repository profile
+        # do not set DOH_PROFILE_LOADED
+        return
+    fi
 
     local profile="${1:-odoo.profile}"
     if [[ "${profile}" =~ ^(http|ftp)[s]?://.* ]]; then
@@ -1145,7 +1177,7 @@ cmd_internal() {
 
 cmd_config() {
 : <<HELP_CMD_CONFIG
-doh config [name [value] | -u name | -l]
+doh config [--global] [name [value] | -u name | -l]
 
 Get and set odoo profile options
 
@@ -1156,6 +1188,12 @@ options:
 HELP_CMD_CONFIG
     local listall="0"
     local varunset="0"
+    local user_global_file="0"
+
+    if [ x"$1" == x"--global" ]; then
+        user_global_file="1"
+        shift;
+    fi
 
     OPTIND=1
     while getopts ":lu" opt; do
@@ -1175,7 +1213,16 @@ HELP_CMD_CONFIG
         cmd_help "config"
     fi
 
-    local conffile=$(doh_profile_find)
+    if [ x"${user_global_file}" = x"1" ]; then
+        local conffile="${DOH_USER_GLOBAL_CONFIG}"
+        if [ ! -e "${DOH_USER_GLOBAL_CONFIG}" ]; then
+            local user_config_dir=$(dirname "${DOH_USER_GLOBAL_CONFIG}")
+            mkdir -p "${user_config_dir}"
+            touch "${DOH_USER_GLOBAL_CONFIG}"
+        fi
+    else
+        local conffile=$(doh_profile_find)
+    fi
 
     if [ x"${listall}" = x"1" ]; then
         local SECTIONS=$(conf_file_get_sections "${conffile}")
