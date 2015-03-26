@@ -256,6 +256,12 @@ ${option}=${value}
     fi
 }
 
+sanitize_url_to_cache_dirname() {
+    local cache_name=$(echo "$1" | sed -r 's#^[a-zA-Z0-9]*://(.*@)?##; s/\.git$//; s/[^a-zA-Z0-9]/_/g')
+    local cache_dir="${CONF_GIT_CACHE_DIR}/${cache_name}"
+    echo "${cache_dir}"
+}
+
 gitlab_cache_auth_token() {
     # $1: gitlab url
     if [ x"${GITLAB_CACHED_AUTH_TOKENS[$1]}" = x"" ]; then
@@ -899,6 +905,45 @@ doh_check_dirs() {
     done
 }
 
+doh_cache_update() {
+    doh_profile_load --user-profile-only
+
+    local repourl=""
+    if [ x"${CONF_GIT_CACHE_DIR}" != x"" ] && [ -d "${CONF_GIT_CACHE_DIR}" ]; then
+        for repodir in $(ls -1 "${CONF_GIT_CACHE_DIR}"); do
+            repourl=$(git -C "${CONF_GIT_CACHE_DIR}/${repodir}" config remote.origin.url)
+            elog "updating cached repository from ${repourl}"
+            erun git -C "${CONF_GIT_CACHE_DIR}/${repodir}" --bare fetch all
+
+            #git -C "${CONF_GIT_CACHE_DIR}/${repodir}" --bare repack -a -d -l
+        done
+    fi
+}
+
+doh_cache_migrate_existing_section() {
+    doh_profile_load
+
+    local section="${1,,}"
+    local section_dir=$(d="DIR_${section^^}"; echo -n "${!d}")
+    local section_repo_url=$(conf_env_get "${section}.repo")
+
+    local cache_dir=$(sanitize_url_to_cache_dirname "${section_repo_url}")
+    local obj_alternate_file="${section_dir}/.git/objects/info/alternates"
+
+    if [ ! -e "${cache_dir}" ]; then
+        die "Unable to migrate, cached repository does not exists"
+    fi
+    if [ -e "${obj_alternate_file}" ]; then
+        die "Unable to migrate, objects alternates already exists"
+    fi
+
+    edebug "configure section ${section} to use objects from cache"
+    echo "${cache_dir}/objects" > "${obj_alternate_file}"
+
+    edebug "repacking section ${section}"
+    erun git -C "${section_dir}" repack -a -d -l
+}
+
 doh_update_section() {
     local section_clean="0"
 
@@ -933,10 +978,12 @@ doh_update_section() {
         elog "updating ${section,,}"
         [ x"${section_repo_url}" = x"" ] && die "No repository url specified for section ${1}"
         section_branch="${section_branch:-master}"  # follow git default branch, i.e 'master'
+        local newly_created_git_repo="0"
 
         export GIT_SSH="$0"
 
         if ! helper_is_dir_repo "${section_dir}" "${section_type}" "${section_repo_url}"; then
+            newly_created_git_repo="1"
             edebug "creating new empty repository"
             erun rm -Rf -- "${section_dir}"
             erun git init "${section_dir}"
@@ -958,6 +1005,26 @@ doh_update_section() {
             echo "${section_sparsecheckout}" | tr ',' '\n'  > "${sparsecheckout_path}"
         else
             echo '/*' > "${sparsecheckout_path}" # default, all files
+        fi
+
+        # check for object store reference/cache directory (saving spaces)
+        if [ x"${CONF_GIT_CACHE_DIR}" != x"" ]; then
+            if [ ! -d "${CONF_GIT_CACHE_DIR}" ]; then
+                mkdir -p "${CONF_GIT_CACHE_DIR}"
+            fi
+            local cache_dir=$(sanitize_url_to_cache_dirname "${section_repo_url}")
+
+            if [ ! -e "${cache_dir}" ]; then
+                edebug "cloning repository to cache"
+                erun git -c "credential.helper=cache" clone --bare "${section_repo_url}" "${cache_dir}" || die 'Unable to clone cache git repository'
+            else
+                edebug "updating repository to cache"
+                erun git -C "${cache_dir}" -c "credentail.helper=cache" fetch --all || die 'Unable to update cache git repository'
+            fi
+
+            if [ x"${newly_created_git_repo}" = x"1" ]; then
+                doh_cache_migrate_existing_section "${section}"
+            fi
         fi
 
         # pre-fetch
