@@ -979,8 +979,12 @@ doh_sublime_project_template() {
     doh_profile_load
 
     PROJ_TMPL_FILE="${DIR_ROOT}/odoo.sublime-project"
+    PROJ_PYTHON_VERSION="2.7"
     cat >"${PROJ_TMPL_FILE}" <<EOF
 {
+    "SublimeLinter": {
+        "@python": ${PROJ_PYTHON_VERSION}
+    },
     "folders":
     [
         {
