@@ -3,7 +3,7 @@
 DOH_VERSION="0.5"
 
 # Setup output logging
-DOH_LOGFILE=/tmp/doh.log
+DOH_LOGFILE=/tmp/doh.$$.log
 DOH_LOGLEVEL="${DOH_LOGLEVEL:-info}"
 DOH_PROFILE_LOADED="0"
 DOH_PARTS="main addons extra client"
