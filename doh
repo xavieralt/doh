@@ -900,6 +900,18 @@ doh_check_dirs() {
 }
 
 doh_update_section() {
+    local section_clean="0"
+
+    OPTIND=1
+    while getopts ":c" opt; do
+        case $opt in
+            c)
+                section_clean="1"
+                ;;
+        esac
+    done
+    shift $(($OPTIND - 1))
+
     [ $# -lt 1 ] && return
     # whitelist allowed sections
     doh_profile_load
@@ -909,6 +921,7 @@ doh_update_section() {
     [ x"$(conf_env_get "${1}")" != x"1" ] && return  # section is not defined
 
     local section="${1^^}"
+    local section_name="$1"
     local section_dir=$(d="DIR_${section^^}"; echo -n "${!d}")
     local section_repo_url=$(conf_env_get "${section}.repo")
     local section_type=$(conf_env_get "${section}.type" "git")
@@ -947,10 +960,29 @@ doh_update_section() {
             echo '/*' > "${sparsecheckout_path}" # default, all files
         fi
 
-        erun git -C "${section_dir}" checkout -f . # remove local changes
+        # pre-fetch
+        local section_current_branch=$(git -C "${section_dir}" symbolic-ref --short HEAD)
+        if [ x"${section_clean}" = x"1" ]; then
+            edebug "update-section ${section_name}: pre-fetch: removing local changes"
+            erun git -C "${section_dir}" checkout -f . # remove local changes
+        fi
+
+        # fetch
+        edebug "update-section ${section_name}: fetch: fetching from origin/${section_branch}"
         erun --show git -C "${section_dir}" -c "credential.helper=cache" fetch -f origin "${section_branch}" || die 'Unable to fetch git repository'
-        erun git -C "${section_dir}" reset --hard "origin/${section_branch}"
-        erun git -C "${section_dir}" checkout -f "${section_branch}"
+
+        # post-fetch
+        if [ x"${section_clean}" = x"1" ] || [ x"${newly_created_git_repo}" = x"1" ]; then
+            edebug "update-section ${section_name}: post-fetch: checking out from origin/${section_branch}"
+            erun git -C "${section_dir}" reset --hard "origin/${section_branch}"
+            erun git -C "${section_dir}" checkout -f "${section_branch}"
+        elif [ $(git -C "${section_dir}" config branch.${section_current_branch}.rebase) = "true" ]; then
+            edebug "update-section ${section_name}: rebasing onto branch ${section_branch}"
+            erun git -C "${section_dir}" rebase "${section_branch}"
+        else
+            edebug "update-section ${section_name}: merging with last head"
+            erun git -C "${section_dir}" merge FETCH_HEAD
+        fi
 
         unset GIT_SSH
 
@@ -1421,7 +1453,7 @@ HELP_CMD_INSTALL
 
     elog "fetching odoo from remote git repository (this can take some time...)"
     for part in $DOH_PARTS; do
-        doh_update_section "${part}"
+        doh_update_section -c "${part}"
     done
 
     if [ x"$local_database" = x"true" ]; then
@@ -1467,14 +1499,35 @@ HELP_CMD_UPGRADE
 
 cmd_update() {
 : <<HELP_CMD_UPGRADE
-doh update
+doh update [--clean] [section1 ...]
+
+options:
+  --clean            cleanup section directory (erase local changes)
 HELP_CMD_UPGRADE
+
+    section_clean=""
+    if [ x"$1" = x"--clean" ]; then
+        section_clean="-c"
+        shift;
+    fi
 
     doh_profile_load
     doh_profile_update
     doh_check_dirs
 
-    for part in $DOH_PARTS; do
+    local section_to_update="${DOH_PARTS}"
+    if [ $# -gt 0 ]; then
+        section_to_update=""
+        for section_name in "$@"; do
+            for part in ${DOH_PARTS}; do
+                if [ x"${section_name}" = x"${part}" ]; then
+                    section_to_update="${section_to_update} $section_name"
+                fi
+            done
+        done
+    fi
+
+    for part in $section_to_update; do
         doh_update_section "${part}"
     done
 }
