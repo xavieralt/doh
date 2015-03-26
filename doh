@@ -394,6 +394,27 @@ helper_is_dir_repo() {
     fi
 }
 
+doh_check_stage0_depends() {
+    if ! (which sudo >/dev/null 2>&1); then
+        echo "please install sudo before continuing";
+        exit 2;
+    fi
+    if ! (which curl >/dev/null 2>&1); then
+        if [ -t 0 ]; then
+            while true; do
+                read -p "we need to install 'curl' before continuing, proceed? [y/n] " yn
+                case $yn in
+                    [yY]* ) dpkg_check_packages_installed "curl"; break;;
+                    [nN]* ) exit 2;;
+                    * ) echo "please choose Y or N";;
+                esac
+            done
+        else
+            dpkg_check_packages_installed "curl"
+        fi
+    fi
+}
+
 doh_check_bootstrap_depends() {
     local deps="p7zip-full git python patch openssh-client"
     local missing_pkg=""
@@ -1877,15 +1898,7 @@ if [ x"${USER}" = x"" ]; then
 fi
 
 # stage 0 dependencies
-stage_0_missing=0
-for exe in sudo curl; do
-    exe_path=$(which "${exe}")
-    if [ $? -ne 0 ]; then
-        eerror "please install ${exe} before starting/installing doh"
-        stage_0_missing=1
-    fi
-done
-[[ x"${stage_0_missing}" = x"1" ]] && exit 2;
+doh_check_stage0_depends
 
 
 CMD="$1"; shift;
@@ -1899,13 +1912,12 @@ case $CMD in
         if [ -e "${doh_path}" ] && [ -t 0 ]; then
             # ask user about upgrading
             while true; do
-                read -p "update doh (at ${doh_path}) with new version [y/n] " REPLY;
-                if [ x"${REPLY}" = x"n" ]; then
-                    exit 0;
-                fi
-                if [ x"${REPLY}" = x"y" ]; then
-                    break;
-                fi
+                read -p "update doh (at ${doh_path}) with new version? [y/n] " yn;
+                case $yn in
+                    [yY]* ) break;;
+                    [nN]* ) exit 2;;
+                    * ) echo "please choose Y or N"
+                esac
             done
         fi
 
