@@ -1064,7 +1064,7 @@ doh_update_section() {
             edebug "update-section ${section_name}: post-fetch: checking out from origin/${section_branch}"
             erun git -C "${section_dir}" reset --hard "origin/${section_branch}"
             erun git -C "${section_dir}" checkout -f "${section_branch}"
-        elif [ $(git -C "${section_dir}" config branch.${section_current_branch}.rebase) = "true" ]; then
+        elif [ x$(git -C "${section_dir}" config branch.${section_current_branch}.rebase) = x"true" ]; then
             edebug "update-section ${section_name}: rebasing onto branch ${section_branch}"
             erun git -C "${section_dir}" rebase "${section_branch}"
         else
