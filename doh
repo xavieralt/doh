@@ -1591,12 +1591,12 @@ HELP_CMD_UPGRADE
 }
 
 cmd_update() {
-: <<HELP_CMD_UPGRADE
+: <<HELP_CMD_UPDATE
 doh update [--clean] [section1 ...]
 
 options:
   --clean            cleanup section directory (erase local changes)
-HELP_CMD_UPGRADE
+HELP_CMD_UPDATE
 
     section_clean=""
     if [ x"$1" = x"--clean" ]; then
