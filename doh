@@ -995,6 +995,11 @@ doh_update_section() {
     local section_patchset=$(conf_env_get "${section}.patchset")
     local section_sparsecheckout=$(conf_env_get "${section}.sparse_checkout")
 
+    if [ x"${section_patchset}" != x"" ]; then
+        # when have section with patch, forcing cleanup
+        section_clean="1"
+    fi
+
     if [[ x"${section_type}" = x"git" ]]; then
         elog "updating ${section,,}"
         [ x"${section_repo_url}" = x"" ] && die "No repository url specified for section ${1}"
