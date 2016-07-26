@@ -609,7 +609,18 @@ db_get_server_is_local() {
 db_get_server_local_cmd() {
     doh_profile_load
 
-    if ! db_get_server_is_local; then
+    if [ x"${CONF_RUNTIME_DOCKER}" != x"0" ]; then
+        local dk_network="${CONF_RUNTIME_DOCKER_NETWORK}"
+        local dk_db_name="${CONF_RUNTIME_DOCKER_PGHOST}"
+        local dk_db_container_name="${dk_network}-${dk_db_name}"
+        echo docker run --rm -it --net=${dk_network} \
+            -e PGHOST="${dk_db_name}" \
+            -e PGUSER="${CONF_RUNTIME_DOCKER_PGUSER}" \
+            -e PGPASSWORD="${CONF_RUNTIME_DOCKER_PGPASSWD}" \
+            ${CONF_RUNTIME_DOCKER_PGIMAGE} \
+            $1
+        return $TRUE
+    elif ! db_get_server_is_local; then
         echo "$1";
         return $TRUE
     fi
@@ -1869,7 +1880,7 @@ HELP_CMD_CREATE_DB
     doh_profile_load
     db_client_setup_env
     elog "creating database ${DB}"
-    erunquiet "${createdb}" -E unicode "${DB}" || die "Unable to create database ${DB}"
+    erunquiet ${createdb} -E unicode "${DB}" || die "Unable to create database ${DB}"
     elog "initializing database ${DB} for odoo"
     erun --show doh_run_server -d "${DB}" --stop-after-init -i "${CONF_DB_INIT_MODULES_ON_CREATE:-base}" ${CONF_DB_INIT_EXTRA_ARGS} || die "Failed to initialize database ${DB}"
     elog "database ${DB} created successfully"
@@ -1891,7 +1902,7 @@ HELP_CMD_DROP_DB
     db_client_setup_env
     doh_svc_stop
     elog "droping database ${DB}"
-    erunquiet "${dropdb}" "${DB}" || die "Unable to drop database ${DB}"
+    erunquiet ${dropdb} "${DB}" || die "Unable to drop database ${DB}"
 }
 
 cmd_copy_db() {
@@ -1903,7 +1914,7 @@ HELP_CMD_COPY_DB
         echo "Usage: doh copy-db: missing arguments -- TEMPLATE_NAME NAME"
         cmd_help "copy_db"
     fi
-    local psql=$(db_get_server_local_cmd "psql")
+    local create_db=$(db_get_server_local_cmd "createdb")
     TMPL_DB="$1"
     DB="$2"
 
@@ -1911,7 +1922,7 @@ HELP_CMD_COPY_DB
     db_client_setup_env
     doh_svc_stop
     elog "copying database ${TMPL_DB} to ${DB}"
-    erunquiet "${psql}" postgres -c "CREATE DATABASE \"${DB}\" ENCODING 'unicode' TEMPLATE \"${TMPL_DB}\"" || die "Unable to copy database ${TMPL_DB} to ${DB}"
+    erunquiet ${create_db} "${DB}" -T "${TMPL_DB}" || die "Unable to copy database ${TMPL_DB} to ${DB}"
 }
 
 cmd_upgrade_db() {
