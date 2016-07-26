@@ -734,6 +734,7 @@ doh_profile_load() {
     export DIR_MAIN="${ROOT}/main"
     export DIR_ADDONS="${ROOT}/main/addons"
     export DIR_EXTRA="${ROOT}/extra"
+    export DIR_ENTERPRISE="${ROOT}/enterprise"
     export DIR_CLIENT="${ROOT}/client"
     export DIR_CONF="${ROOT}/conf"
     export DIR_LOGS="${ROOT}/logs"
@@ -816,7 +817,7 @@ doh_profile_load() {
     fi
 
     local ADDONS_PATH=""
-    for part in EXTRA ADDONS; do
+    for part in EXTRA ENTERPRISE ADDONS; do
         local v="CONF_$part";
         local d="DIR_$part";
         local part_path="";
