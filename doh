@@ -717,15 +717,21 @@ doh_profile_load() {
         user_profile_only="1"
     fi
 
+    local profile="${1:-odoo.profile}"
+    local ROOT="${PWD}"
+    if [ -f "${profile}" ]; then
+        ROOT=$(dirname "${profile}")
+    fi
+
     # $1: odoo.profile
-    export DIR_ROOT="${PWD}"
-    export DIR_MAIN="${PWD}/main"
-    export DIR_ADDONS="${PWD}/main/addons"
-    export DIR_EXTRA="${PWD}/extra"
-    export DIR_CLIENT="${PWD}/client"
-    export DIR_CONF="${PWD}/conf"
-    export DIR_LOGS="${PWD}/logs"
-    export DIR_RUN="${PWD}/run"
+    export DIR_ROOT="${ROOT}"
+    export DIR_MAIN="${ROOT}/main"
+    export DIR_ADDONS="${ROOT}/main/addons"
+    export DIR_EXTRA="${ROOT}/extra"
+    export DIR_CLIENT="${ROOT}/client"
+    export DIR_CONF="${ROOT}/conf"
+    export DIR_LOGS="${ROOT}/logs"
+    export DIR_RUN="${ROOT}/run"
 
     # load user global config
     if [ -f "${DOH_USER_GLOBAL_CONFIG}" ]; then
@@ -804,7 +810,7 @@ doh_profile_load() {
     fi
 
     local ADDONS_PATH=""
-    for part in ADDONS EXTRA; do
+    for part in EXTRA ADDONS; do
         local v="CONF_$part";
         local d="DIR_$part";
         local part_path="";
@@ -1169,7 +1175,7 @@ doh_run_server() {
     fi
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
-    if [[ x"${v}" =~ ^x(8.0|7.0|master)$ ]]; then
+    if [[ x"${v}" =~ ^x(9.0|8.0|7.0|master)$ ]]; then
         edebug "Starting server using: ${start} ${DIR_MAIN}/openerp-server -c ${DIR_CONF}/odoo-server.conf $@"
         ${start} "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
     elif [[ x"${v}" =~ ^x(6.1|6.0)$ ]]; then
