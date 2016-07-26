@@ -1323,24 +1323,52 @@ doh_run_server_docker() {
         fi
     fi
 
-    local docker_volumes="${DOH_DOCKER_VOLUMES}"
+    local docker_args="${DOH_DOCKER_VOLUMES}"
     if [ -f "${DIR_CONF}/odoo-server.conf" ]; then
-        docker_volumes="${docker_volumes} -v $(readlink -f ${DIR_CONF}/odoo-server.conf):/etc/odoo/openerp-server.conf:ro"
+        docker_args="${docker_args} -v $(readlink -f ${DIR_CONF}/odoo-server.conf):/etc/odoo/openerp-server.conf:ro"
     fi
+
+    local odoo_args="--addons-path=${DOH_DOCKER_VOLUMES_PATH}"
+    if [[ x"${v}" =~ ^x(8.0) ]]; then
+        # Odoo 8.0 does not support passing database args as environment
+        # variable, force it args arguments
+        odoo_args="${odoo_args} --db_host=${CONF_RUNTIME_DOCKER_PGHOST}"
+        odoo_args="${odoo_args} --db_user=${CONF_RUNTIME_DOCKER_PGUSER}"
+        odoo_args="${odoo_args} --db_password=${CONF_RUNTIME_DOCKER_PGPASSWD}"
+    fi
+
+    local arg;
+    local opt_xmlrpc_port="";
+    for arg in "$@"; do
+        if [ x"${opt_xmlrpc_port}" = x"+" ]; then
+            opt_xmlrpc_port="$arg"; break
+        fi
+        if [[ x"${arg}" =~ ^x--xmlrpc-port= ]]; then
+            opt_xmlrpc_port="${arg#*=}"
+        elif [ x"${arg}" = x"--xmlrpc-port" ]; then
+            opt_xmlrpc_port="+"
+        fi
+    done
+    if [ $((${opt_xmlrpc_port} + 0)) -eq 0 ]; then
+        if [ -f "${DIR_CONF}/odoo-server.conf" ]; then
+            opt_xmlrpc_port=$(conf_file_get "${DIR_CONF}/odoo-server.conf" options.xmlrpc_port)
+        fi
+        opt_xmlrpc_port=${opt_xmlrpc_port:-8069}
+    fi
+    docker_args="${docker_args} -p ${opt_xmlrpc_port}:${opt_xmlrpc_port}"
 
     docker_network_create "${CONF_RUNTIME_DOCKER_NETWORK}"
     docker_volume_create "${CONF_RUNTIME_DOCKER_DATAVOLUME}"
-
     docker run --rm -it \
-        --net=${CONF_SERVER_DOCKER_NETWORK} \
-        -e DB_PORT_5432_TCP_ADDR=${CONF_RUNTIME_DOCKER_PGHOST} \
-        -e DB_ENV_POSTGRES_USER=${CONF_RUNTIME_DOCKER_PGUSER} \
-        -e DB_ENV_POSTGRES_PASSWORD=${CONF_RUNTIME_DOCKER_PGPASSWD} \
+        --net=${CONF_RUNTIME_DOCKER_NETWORK} \
+        -e PGHOST=${CONF_RUNTIME_DOCKER_PGHOST} \
+        -e PGUSER=${CONF_RUNTIME_DOCKER_PGUSER} \
+        -e PGPASSWORD=${CONF_RUNTIME_DOCKER_PGPASSWD} \
         -v ${CONF_RUNTIME_DOCKER_DATAVOLUME}:/var/lib/odoo \
-        ${docker_volumes} \
+        ${docker_args} \
         -v $(readlink -f ${DIR_MAIN})/openerp:/usr/lib/python2.7/dist-packages/openerp:ro \
         ${docker_image} \
-        --addons-path=${DOH_DOCKER_VOLUMES_PATH}\
+        ${odoo_args} \
         "$@"
 
 }
