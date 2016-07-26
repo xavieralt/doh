@@ -581,7 +581,7 @@ db_get_server_local_cmd() {
         return $TRUE
     fi
     db_client_setup_env "PORT"
-    local v=$(sudo -u postgres psql -A -t -c 'SHOW server_version' postgres | cut -d'.' -f -2)
+    local v=$(psql -A -t -c 'SHOW server_version' postgres | cut -d'.' -f -2)
     local server_bin_path="/usr/lib/postgresql/${v}/bin"
 
     if [ -d "${server_bin_path}" ]; then
