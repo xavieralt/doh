@@ -59,7 +59,11 @@ ecolor() {
 
 erunquiet() {
     edebug "will run: $@"
-    "$@" 2>&1 >>${DOH_LOGFILE}
+    if [ x"${DOH_LOGFILE}" != x"" ]; then
+        "$@" 2>&1 >>${DOH_LOGFILE}
+    else
+        "$@" >/dev/null 2>&1
+    fi
     return $?
 }
 
@@ -70,7 +74,11 @@ erun() {
         "$@" >&6 2>&7
     else
         edebug "will run: $@"
-        "$@" >>${DOH_LOGFILE} 2>&1
+        if [ x"${DOH_LOGFILE}" != x"" ]; then
+            "$@" >>${DOH_LOGFILE} 2>&1
+        else
+            "$@" >/dev/null 2>&1
+        fi
     fi
     return $?
 }
@@ -107,8 +115,6 @@ edebug() {
         elogmsg 'DEBUG' "$@" >&2;
     elif [ x"${DOH_LOGFILE}" != x"" ]; then
         echo "$@" >>${DOH_LOGFILE}
-    else
-        echo "$@"
     fi
 }
 
