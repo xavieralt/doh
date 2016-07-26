@@ -1380,6 +1380,29 @@ HELP_CMD_CONFIG
     fi
 }
 
+cmd_scaffold() {
+: <<HELP_CMD_SCAFFOLD
+doh scaffold [-h] [-t TEMPLATE] name [dest]
+
+Generates an Odoo module skeleton.
+
+HELP_CMD_SCAFFOLD
+    local conffile=$(doh_profile_find)
+    doh_profile_load "${conffile}"
+
+    # set stdout/stderr to terminal pty
+    exec 1>&6 6>&-
+    exec 2>&7 7>&-
+
+    local v="${CONF_PROFILE_VERSION:-8.0}"
+    if [[ x"${v}" =~ ^x(8.0|master)$ ]]; then
+        edebug "Starting server using: ${start} ${DIR_MAIN}/openerp-server --addons-path=${DOH_ADDONS_PATH} scaffold $@"
+        ${start} "${DIR_MAIN}/openerp-server" "--addons-path=${DOH_ADDONS_PATH}" scaffold "$@"
+    else
+        error "Sorry, scaffold in not available for your server version"
+    fi
+}
+
 cmd_init() {
 : <<HELP_CMD_INIT
 doh init [-f] [-t VERSION] [DIR]
