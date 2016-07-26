@@ -613,7 +613,7 @@ db_get_server_local_cmd() {
         local dk_network="${CONF_RUNTIME_DOCKER_NETWORK}"
         local dk_db_name="${CONF_RUNTIME_DOCKER_PGHOST}"
         local dk_db_container_name="${dk_network}-${dk_db_name}"
-        local dk_extra_args=""
+        local dk_extra_args="${DOH_DOCKER_CMD_EXTRA:-}"
         if [ x"$1" = x"psql" ]; then
             dk_extra_args="$dk_extra_args -e TERM=${TERM} "
             # dk_extra_args="${dk_extra_args} -e PAGER=/bin/less -v /usr/bin/less:/bin/less:ro"
@@ -1477,6 +1477,7 @@ Database commands
   create-db     create a new database using current profile
   drop-db       drop an existing database
   copy-db       duplicate an existing database
+  restore-db    restore a database from a backup dump (custom format)
   upgrade-db    upgrade a specific database
 
 Development commands:
@@ -1976,6 +1977,42 @@ HELP_CMD_UPGRADE_DB
     fi
     elog "database ${DB} upgraded successfully"
 }
+
+
+cmd_restore_db() {
+: <<HELP_CMD_RESTORE_DB
+doh restore-db DB_NAME DB_FILE
+
+HELP_CMD_RESTORE_DB
+
+    local db_name="$1"
+    local db_file="$2"
+    local db_restore_file="$2"
+
+    doh_profile_load
+    db_client_setup_env
+    [ -f "${db_file}" ] || die "File ${db_file} does not exist."
+
+    local drop_db=$(db_get_server_local_cmd "dropdb")
+    local create_db=$(db_get_server_local_cmd "createdb")
+    local restore_db=$(db_get_server_local_cmd "pg_restore")
+    if [ x"${CONF_RUNTIME_DOCKER}" != x"0" ]; then
+        db_file_abspath=$(readlink -f ${db_file})
+        restore_db=$(DOH_DOCKER_CMD_EXTRA="-v ${db_file_abspath}:/tmp/database.dump" \
+                     db_get_server_local_cmd "pg_restore")
+        db_restore_file="/tmp/database.dump"
+    fi
+
+    elog "dropping database ${db_name}"
+    erunquiet ${drop_db} --if-exists "${db_name}"
+
+    elog "creating database ${db_name}"
+    erunquiet ${create_db} "${db_name}" -T template0
+
+    elog "restoring database ${db_name} from ${db_file}"
+    erun --show ${restore_db} -Ox -j2 -d "${db_name}" "${db_restore_file}"
+}
+
 
 cmd_client() {
 : <<HELP_CMD_CLIENT
