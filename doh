@@ -704,9 +704,13 @@ EOF
         IFS="$OLDIFS"
     fi
 
-    if [ x$(stat -c %a ${ODOO_CONF_FILE}) != x"640" ]; then
+    local odoo_conf_file_perm="640"
+    if [ x"${CONF_RUNTIME_DEVELOPER_MODE}" != x"0" ]; then
+        odoo_conf_file_perm="644"
+    fi
+    if [ x$(stat -c %a ${ODOO_CONF_FILE}) != x"${odoo_conf_file_perm}" ]; then
         elog "fixing permissions for odoo config file"
-        erunquiet ${with_sudo} chmod 640 "${ODOO_CONF_FILE}"
+        erunquiet ${with_sudo} chmod ${odoo_conf_file_perm} "${ODOO_CONF_FILE}"
     fi
 
     if [ x"${CONF_RUNTIME_DEVELOPER_MODE}" = x"0" ]; then
