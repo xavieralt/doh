@@ -23,6 +23,7 @@ export CONF_RUNTIME_DOCKER_PGHOST=db
 export CONF_RUNTIME_DOCKER_PGUSER=odoo
 export CONF_RUNTIME_DOCKER_PGPASSWD=odoo
 export CONF_RUNTIME_DOCKER_DATAVOLUME=odoo-data
+export CONF_RUNTIME_DOCKER_PGIMAGE=postgres:9.4
 
 doh_setup_logging() {
 
@@ -460,6 +461,11 @@ doh_check_bootstrap_depends() {
 doh_check_odoo_depends() {
     doh_profile_load
 
+    if [ x"${CONF_RUNTIME_DOCKER}" != x"0" ]; then
+        dpkg_check_packages_installed "docker-engine"
+        return
+    fi
+
     local depend_parts="MAIN"
     if [ x"${CONF_CLIENT}" = x"1" ]; then
         depend_parts="${depend_parts} CLIENT"
@@ -616,7 +622,24 @@ db_get_server_local_cmd() {
 db_config_local_server() {
     doh_profile_load
 
-    if db_get_server_is_local; then
+    if [ x"${CONF_RUNTIME_DOCKER}" != x"0" ]; then
+        local dk_network="${CONF_RUNTIME_DOCKER_NETWORK}"
+        local dk_db_name="${CONF_RUNTIME_DOCKER_PGHOST}"
+        local dk_db_container_name="${dk_network}-${dk_db_name}"
+
+        docker_network_create "${dk_network}"
+        docker_volume_create "${dk_db_container_name}-data"
+        if ! docker_container_exist "${dk_db_container_name}"; then
+            elog "Creating database container: ${dk_db_container_name}"
+            docker run -d --name=${dk_db_container_name} \
+                --net=${dk_network} --net-alias=${dk_db_name} \
+                -v "${dk_db_container_name}-data:/var/lib/postgrseql/data" \
+                -e POSTGRES_USER=${CONF_RUNTIME_DOCKER_PGUSER} \
+                -e POSTGRES_PASSWD=${CONF_RUNTIME_DOCKER_PGPASSWD} \
+                ${CONF_RUNTIME_DOCKER_PGIMAGE}
+        fi
+
+    elif db_get_server_is_local; then
         edebug "configuring local database server"
 
         # only export PGPORT environement
@@ -1225,6 +1248,27 @@ doh_run_server() {
     fi
 }
 
+docker_network_create() {
+    docker network inspect ${1} >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        elog "Creating docker network: ${1}"
+        docker network create ${1}
+    fi
+}
+
+docker_volume_create() {
+    docker volume inspect ${1} >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        elog "Creating docker volume: ${1}"
+        docker volume create --name=${1}
+    fi
+}
+
+docker_container_exist() {
+    docker ps -a --format '{{.Names}}' | grep "^${1}$" >/dev/null
+    return $?
+}
+
 doh_run_server_docker() {
     doh_profile_load
     doh_check_dirs
@@ -1257,17 +1301,8 @@ doh_run_server_docker() {
         docker_volumes="${docker_volumes} -v $(readlink -f ${DIR_CONF}/odoo-server.conf):/etc/odoo/openerp-server.conf:ro"
     fi
 
-    docker network inspect ${CONF_RUNTIME_DOCKER_NETWORK} >/dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        elog "Creating docker network: ${CONF_RUNTIME_DOCKER_NETWORK}"
-        docker network create ${CONF_RUNTIME_DOCKER_NETWORK}
-    fi
-
-    docker volume inspect ${CONF_RUNTIME_DOCKER_DATAVOLUME} >/dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        elog "Creating docker volume: ${CONF_RUNTIME_DOCKER_DATAVOLUME}"
-        docker volume create --name=${CONF_RUNTIME_DOCKER_DATAVOLUME}
-    fi
+    docker_network_create "${CONF_RUNTIME_DOCKER_NETWORK}"
+    docker_volume_create "${CONF_RUNTIME_DOCKER_DATAVOLUME}"
 
     docker run --rm -it \
         --net=${CONF_SERVER_DOCKER_NETWORK} \
