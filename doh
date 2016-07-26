@@ -740,6 +740,10 @@ doh_profile_load() {
     export DIR_LOGS="${ROOT}/logs"
     export DIR_RUN="${ROOT}/run"
 
+    if [ -f ${DIR_ROOT}/odoo-server.conf ]; then
+        export DIR_CONF="${ROOT}"
+    fi
+
     # load user global config
     if [ -f "${DOH_USER_GLOBAL_CONFIG}" ]; then
         edebug "loading user global profile"
