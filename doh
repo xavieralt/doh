@@ -3,7 +3,7 @@
 DOH_VERSION="0.5"
 
 # Setup output logging
-DOH_LOGFILE=/tmp/doh.$$.log
+#DOH_LOGFILE=/tmp/doh.$$.log
 DOH_LOGLEVEL="${DOH_LOGLEVEL:-info}"
 DOH_PROFILE_LOADED="0"
 DOH_PARTS="main addons extra client"
@@ -16,6 +16,10 @@ declare -A GITLAB_CACHED_AUTH_PASSWD
 declare GITLAB_API_RESULT
 
 doh_setup_logging() {
+
+if [ x"${DOH_LOGFILE}" = x"" ]; then
+    return
+fi
 
 exec 6>&1
 exec 7>&2
@@ -92,8 +96,10 @@ eerror() { elogmsg 'ERROR' "$@" >&2; }
 edebug() {
     if [ x"${DOH_LOGLEVEL}" = x"debug" ]; then
         elogmsg 'DEBUG' "$@" >&2;
-    else
+    elif [ x"${DOH_LOGFILE}" != x"" ]; then
         echo "$@" >>${DOH_LOGFILE}
+    else
+        echo "$@"
     fi
 }
 
@@ -1875,8 +1881,10 @@ HELP_CMD_RUN
     doh_profile_load
 
     # set stdout/stderr to terminal pty
-    exec 1>&6 6>&-
-    exec 2>&7 7>&-
+    if [ x"${DOH_LOGFILE}" != x"" ]; then
+        exec 1>&6 6>&-
+        exec 2>&7 7>&-
+    fi
     doh_run_server "$@"
 }
 
