@@ -15,6 +15,15 @@ declare -A GITLAB_CACHED_AUTH_USERS
 declare -A GITLAB_CACHED_AUTH_PASSWD
 declare GITLAB_API_RESULT
 
+
+# GLOBAL CONFIG (default)
+export CONF_RUNTIME_DOCKER=0
+export CONF_RUNTIME_DOCKER_NETWORK=odoo
+export CONF_RUNTIME_DOCKER_PGHOST=db
+export CONF_RUNTIME_DOCKER_PGUSER=odoo
+export CONF_RUNTIME_DOCKER_PGPASSWD=odoo
+export CONF_RUNTIME_DOCKER_DATAVOLUME=odoo-data
+
 doh_setup_logging() {
 
 if [ x"${DOH_LOGFILE}" = x"" ]; then
@@ -821,6 +830,8 @@ doh_profile_load() {
     fi
 
     local ADDONS_PATH=""
+    local DOCKER_VOLUMES=""
+    local DOCKER_VOLUMES_PATH=""
     for part in EXTRA ENTERPRISE ADDONS; do
         local v="CONF_$part";
         local d="DIR_$part";
@@ -841,11 +852,16 @@ doh_profile_load() {
         if [ x"${part_path}" != x"" ]; then
             if [ x"${ADDONS_PATH}" != x"" ]; then
                 ADDONS_PATH="${ADDONS_PATH},"
+                DOCKER_VOLUMES_PATH="${DOCKER_VOLUMES_PATH},"
             fi
             ADDONS_PATH="${ADDONS_PATH}${part_path}"
+            DOCKER_VOLUMES="${DOCKER_VOLUMES} -v $(readlink -f ${part_path}):/mnt/${part,,}:ro"
+            DOCKER_VOLUMES_PATH="${DOCKER_VOLUMES_PATH}/mnt/${part,,}"
         fi
     done
     export DOH_ADDONS_PATH="${ADDONS_PATH}"
+    export DOH_DOCKER_VOLUMES="${DOCKER_VOLUMES}"
+    export DOH_DOCKER_VOLUMES_PATH="${DOCKER_VOLUMES_PATH}"
 
     export CONF_PROFILE_RUNAS="${CONF_PROFILE_RUNAS:-${USER}}"
 
@@ -1176,6 +1192,13 @@ doh_run_server() {
     doh_profile_load
     doh_check_dirs
 
+    local v="${CONF_PROFILE_VERSION:-8.0}"
+
+    if [ x"$CONF_RUNTIME_DOCKER" != x"0" ]; then
+        doh_run_server_docker "$@"
+        return
+    fi
+
     if [ ! -e "${DIR_CONF}/odoo-server.conf" ]; then
         die "odoo server configuration file is missing, please re-run 'doh reconfigure'"
     fi
@@ -1185,7 +1208,6 @@ doh_run_server() {
 	start="sudo -u ${CONF_PROFILE_RUNAS}"
     fi
 
-    local v="${CONF_PROFILE_VERSION:-8.0}"
     if [[ x"${v}" =~ ^x(9.0|8.0|7.0|master)$ ]]; then
         edebug "Starting server using: ${start} ${DIR_MAIN}/openerp-server -c ${DIR_CONF}/odoo-server.conf $@"
         ${start} "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
@@ -1195,6 +1217,64 @@ doh_run_server() {
     else
         die "No known way to start server for version ${v}"
     fi
+}
+
+doh_run_server_docker() {
+    doh_profile_load
+    doh_check_dirs
+
+    local v="${CONF_PROFILE_VERSION:-8.0}"
+    if ! [[ x"${v}" =~  ^x(9.0|8.0|master) ]]; then
+        die "Docker runtime only supportted work for odoo 8.0 and later"
+    fi
+
+    local docker_image="odoo:${v}"
+    if [ -f ${DIR_EXTRA}/Dockerfile ]; then
+        docker_image="$(basename `readlink -f ${DIR_ROOT}`):latest"
+    fi
+    if [ x"${CONF_RUNTIME_DOCKER_IMAGE}" != x"" ]; then
+        docker_image=${CONF_RUNTIME_DOCKER_IMAGE}
+    fi
+
+    if ! [[ x"$docker_image" =~ ^xodoo: ]]; then
+        docker_image_id=$(\
+                docker images --format "{{.ID}} {{.Repository}}:{{.Tag}}" \
+                | grep "${docker_image}" \
+                | awk '{print $1}')
+        if [ x"${docker_image_id}" = x"" ]; then
+            die "Unable to find image '${docker_image}', please pull or build it manually."
+        fi
+    fi
+
+    local docker_volumes="${DOH_DOCKER_VOLUMES}"
+    if [ -f "${DIR_CONF}/odoo-server.conf" ]; then
+        docker_volumes="${docker_volumes} -v $(readlink -f ${DIR_CONF}/odoo-server.conf):/etc/odoo/openerp-server.conf:ro"
+    fi
+
+    docker network inspect ${CONF_RUNTIME_DOCKER_NETWORK} >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        elog "Creating docker network: ${CONF_RUNTIME_DOCKER_NETWORK}"
+        docker network create ${CONF_RUNTIME_DOCKER_NETWORK}
+    fi
+
+    docker volume inspect ${CONF_RUNTIME_DOCKER_DATAVOLUME} >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        elog "Creating docker volume: ${CONF_RUNTIME_DOCKER_DATAVOLUME}"
+        docker volume create --name=${CONF_RUNTIME_DOCKER_DATAVOLUME}
+    fi
+
+    docker run --rm -it \
+        --net=${CONF_SERVER_DOCKER_NETWORK} \
+        -e DB_PORT_5432_TCP_ADDR=${CONF_RUNTIME_DOCKER_PGHOST} \
+        -e DB_ENV_POSTGRES_USER=${CONF_RUNTIME_DOCKER_PGUSER} \
+        -e DB_ENV_POSTGRES_PASSWORD=${CONF_RUNTIME_DOCKER_PGPASSWD} \
+        -v ${CONF_RUNTIME_DOCKER_DATAVOLUME}:/var/lib/odoo \
+        ${docker_volumes} \
+        -v $(readlink -f ${DIR_MAIN})/openerp:/usr/lib/python2.7/dist-packages/openerp:ro \
+        ${docker_image} \
+        --addons-path=${DOH_DOCKER_VOLUMES_PATH}\
+        "$@"
+
 }
 
 doh_run_client_gtk() {
