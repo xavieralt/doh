@@ -17,6 +17,8 @@ declare GITLAB_API_RESULT
 
 
 # GLOBAL CONFIG (default)
+export CONF_RUNTIME_DEVELOPER_MODE=0
+
 export CONF_RUNTIME_DOCKER=0
 export CONF_RUNTIME_DOCKER_NETWORK=odoo
 export CONF_RUNTIME_DOCKER_PGHOST=db
@@ -670,8 +672,15 @@ doh_generate_server_config_file() {
     # ODOO_ADDONS_PATH="${DIR_ADDONS},${DIR_EXTRA}"
     ODOO_ADDONS_PATH="${DOH_ADDONS_PATH}"
 
-    elog "generating odoo config file"
-    cat <<EOF | erunquiet sudo tee "${ODOO_CONF_FILE}"
+    local with_sudo="sudo"
+    if [ x"${CONF_RUNTIME_DEVELOPER_MODE}" != x"0" ]; then
+        with_sudo=""
+    fi
+
+
+    if [ ! -f ${ODOO_CONF_FILE} ]; then
+        elog "generating odoo config file"
+        cat <<EOF | erunquiet ${with_sudo} tee "${ODOO_CONF_FILE}"
 [options]
 ; This is the password that allows database operations:
 ; admin_passwd = admin
@@ -681,6 +690,7 @@ db_user = ${CONF_DB_USER}
 db_password = ${CONF_DB_PASSWORD:-False}
 addons_path = ${ODOO_ADDONS_PATH}
 EOF
+    fi
 
     VARS=$(conf_file_get_options "${DIR_ROOT}/odoo.profile" "server")
     if [ x"${VARS}" != x"" ]; then
@@ -694,9 +704,14 @@ EOF
         IFS="$OLDIFS"
     fi
 
-    elog "fixing permissions for odoo config file"
-    erunquiet sudo chmod 640 "${ODOO_CONF_FILE}"
-    erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_CONF_FILE}"
+    if [ x$(stat -c %a ${ODOO_CONF_FILE}) != x"640" ]; then
+        elog "fixing permissions for odoo config file"
+        erunquiet ${with_sudo} chmod 640 "${ODOO_CONF_FILE}"
+    fi
+
+    if [ x"${CONF_RUNTIME_DEVELOPER_MODE}" = x"0" ]; then
+        erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_CONF_FILE}"
+    fi
 }
 
 doh_generate_server_init_file() {
@@ -929,13 +944,14 @@ doh_reconfigure() {
 
         # check run-as user
         runas_entry=$(getent passwd "${CONF_PROFILE_RUNAS}")
-        if [ $? -ne 0 ]; then
+        if [ $? -ne 0 ] && [ x"${CONF_RUNTIME_DEVELOPER_MODE}" = x"0" ]; then
             elog "adding new system user '${CONF_PROFILE_RUNAS}' (sudo)"
             erun sudo adduser --system --quiet --group "${CONF_PROFILE_RUNAS}"
         fi
 
         # fetch remote deploy-key if none local
-        if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ]; then
+        if [ x"${CONF_PROFILE_DEPLOY_KEY}" != x"" ] \
+                && [ x"${CONF_RUNTIME_DEVELOPER_MODE}" = x"0" ]; then
             doh_check_dirs "DIR_CONF"
             elog "fetching profile deploy-key"
             touch "${DIR_CONF}/deploy.key"
@@ -950,18 +966,22 @@ doh_reconfigure() {
         db_config_local_server
 
         doh_generate_server_config_file
-        doh_generate_server_init_file
 
-        elog "fixing permissions for odoo log file"
-        ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
-        erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
-        erunquiet sudo touch "${ODOO_LOG_FILE}"
-        erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
-        erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_LOG_FILE}"
+        if [ x"${CONF_RUNTIME_DEVELOPER_MODE}" = x"0" ]; then
+            doh_generate_server_init_file
 
-        if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ] && [ "${CONF_PROFILE_INITRC:-1}" -ne 0 ]; then
-            elog "adding odoo '${CONF_PROFILE_NAME}' to autostart"
-            erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
+            elog "fixing permissions for odoo log file"
+            doh_check_dirs "DIR_LOGS"
+            ODOO_LOG_FILE="${DIR_LOGS}/odoo-server.log"
+            erunquiet sudo mkdir -p $(dirname "${ODOO_LOG_FILE}")
+            erunquiet sudo touch "${ODOO_LOG_FILE}"
+            erunquiet sudo chmod 640 "${ODOO_LOG_FILE}"
+            erunquiet sudo chown "${CONF_PROFILE_RUNAS}:adm" "${ODOO_LOG_FILE}"
+
+            if [ x"${CONF_PROFILE_AUTOSTART}" = x"1" ] && [ "${CONF_PROFILE_INITRC:-1}" -ne 0 ]; then
+                elog "adding odoo '${CONF_PROFILE_NAME}' to autostart"
+                erunquiet sudo update-rc.d "odoo-${CONF_PROFILE_NAME}" defaults
+            fi
         fi
     fi
 }
@@ -973,7 +993,10 @@ doh_check_dirs() {
     if [ x"$1" != x"" ]; then
         local BASE_DIRS="$1"
     else
-        local BASE_DIRS="DIR_ROOT DIR_MAIN DIR_ADDONS DIR_EXTRA DIR_LOGS DIR_RUN DIR_CONF"
+        local BASE_DIRS="DIR_ROOT DIR_MAIN DIR_ADDONS DIR_EXTRA"
+        if [ x"${CONF_RUNTIME_DEVELOPER_MODE}" = x"0" ]; then
+            BASE_DIRS="${BASE_DIR} DIR_LOGS DIR_RUN DIR_CONF"
+        fi
         local V="${CONF_PROFILE_VERSION:-8.0}"
         if [ x"${V}" = x"6.0" ] || [ x"${V}" = x"6.1" ]; then
             BASE_DIRS="$BASE_DIRS DIR_CLIENT"
