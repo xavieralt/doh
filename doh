@@ -613,10 +613,16 @@ db_get_server_local_cmd() {
         local dk_network="${CONF_RUNTIME_DOCKER_NETWORK}"
         local dk_db_name="${CONF_RUNTIME_DOCKER_PGHOST}"
         local dk_db_container_name="${dk_network}-${dk_db_name}"
+        local dk_extra_args=""
+        if [ x"$1" = x"psql" ]; then
+            dk_extra_args="$dk_extra_args -e TERM=${TERM} "
+            # dk_extra_args="${dk_extra_args} -e PAGER=/bin/less -v /usr/bin/less:/bin/less:ro"
+        fi
         echo docker run --rm -it --net=${dk_network} \
             -e PGHOST="${dk_db_name}" \
             -e PGUSER="${CONF_RUNTIME_DOCKER_PGUSER}" \
             -e PGPASSWORD="${CONF_RUNTIME_DOCKER_PGPASSWD}" \
+            ${dk_extra_args} \
             ${CONF_RUNTIME_DOCKER_PGIMAGE} \
             $1
         return $TRUE
@@ -1467,6 +1473,7 @@ Available commands
 
 Database commands
 
+  sql           open a console to the server (psql like)
   create-db     create a new database using current profile
   drop-db       drop an existing database
   copy-db       duplicate an existing database
@@ -1923,6 +1930,18 @@ HELP_CMD_COPY_DB
     doh_svc_stop
     elog "copying database ${TMPL_DB} to ${DB}"
     erunquiet ${create_db} "${DB}" -T "${TMPL_DB}" || die "Unable to copy database ${TMPL_DB} to ${DB}"
+}
+
+cmd_sql() {
+: <<HELP_CMD_SQL
+doh sql ARG...
+
+HELP_CMD_SQL
+    local psql=$(db_get_server_local_cmd "psql")
+
+    doh_profile_load
+    db_client_setup_env
+    erun --show ${psql} "$@"
 }
 
 cmd_upgrade_db() {
