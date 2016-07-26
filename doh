@@ -74,7 +74,11 @@ erun() {
     if [ x"$1" = x"--show" ]; then
         shift;
         edebug "will run: $@"
-        "$@" >&6 2>&7
+        if [ x"${DOH_LOGFILE}" != x"" ]; then
+            "$@" >&6 2>&7
+        else
+            "$@"
+        fi
     else
         edebug "will run: $@"
         if [ x"${DOH_LOGFILE}" != x"" ]; then
