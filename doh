@@ -1384,7 +1384,7 @@ doh_run_server_docker() {
 
     docker_network_create "${CONF_RUNTIME_DOCKER_NETWORK}"
     docker_volume_create "${CONF_RUNTIME_DOCKER_DATAVOLUME}"
-    docker run --rm -it \
+    erun --show docker run --rm -it \
         --net=${CONF_RUNTIME_DOCKER_NETWORK} \
         -e PGHOST=${CONF_RUNTIME_DOCKER_PGHOST} \
         -e PGUSER=${CONF_RUNTIME_DOCKER_PGUSER} \
