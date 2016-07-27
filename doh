@@ -614,11 +614,15 @@ db_get_server_local_cmd() {
         local dk_db_name="${CONF_RUNTIME_DOCKER_PGHOST}"
         local dk_db_container_name="${dk_network}-${dk_db_name}"
         local dk_extra_args="${DOH_DOCKER_CMD_EXTRA:-}"
+        local dk_mode="-it"
+        if [ x"${DOH_DOCHER_NO_TTY}" = x"1" ]; then
+            dk_mode="-i"
+        fi
         if [ x"$1" = x"psql" ]; then
             dk_extra_args="$dk_extra_args -e TERM=${TERM} "
             # dk_extra_args="${dk_extra_args} -e PAGER=/bin/less -v /usr/bin/less:/bin/less:ro"
         fi
-        echo docker run --rm -it --net=${dk_network} \
+        echo docker run --rm ${dk_mode} --net=${dk_network} \
             -e PGHOST="${dk_db_name}" \
             -e PGUSER="${CONF_RUNTIME_DOCKER_PGUSER}" \
             -e PGPASSWORD="${CONF_RUNTIME_DOCKER_PGPASSWD}" \
@@ -1938,6 +1942,9 @@ cmd_sql() {
 doh sql ARG...
 
 HELP_CMD_SQL
+    if [ ! -t 0 ]; then
+        export DOH_DOCHER_NO_TTY=1
+    fi
     local psql=$(db_get_server_local_cmd "psql")
 
     doh_profile_load
