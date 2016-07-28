@@ -807,8 +807,23 @@ doh_profile_load() {
 
     local profile="${1:-odoo.profile}"
     local ROOT="${PWD}"
+
     if [ -f "${profile}" ]; then
         ROOT=$(dirname "${profile}")
+    elif [[ x"${user_profile_only}" != x"1" ]] && [[ ! "${profile}" =~ ^(http|ftp)[s]?://.* ]]; then
+       # try to find profile in upper directories
+       local initpwd="$PWD"
+       NEW_ROOT=$(while [ x"${DIRSTACK[0]}" != x"/" ]; do
+           if [ -f "${profile}" ]; then
+               echo "${PWD}"
+               break
+           fi
+           pushd .. >/dev/null 2>&1
+       done)
+       if [ x"${NEW_ROOT}" != x"" ] && [ -f "${NEW_ROOT}/${profile}" ]; then
+           ROOT="${NEW_ROOT}"
+           cd "${ROOT}"
+       fi
     fi
 
     # $1: odoo.profile
