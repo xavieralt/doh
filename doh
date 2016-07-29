@@ -610,6 +610,7 @@ db_get_server_local_cmd() {
     doh_profile_load
 
     if [ x"${CONF_RUNTIME_DOCKER}" != x"0" ]; then
+        local cmd="$1"
         local dk_network="${CONF_RUNTIME_DOCKER_NETWORK}"
         local dk_db_name="${CONF_RUNTIME_DOCKER_PGHOST}"
         local dk_db_container_name="${dk_network}-${dk_db_name}"
@@ -619,8 +620,15 @@ db_get_server_local_cmd() {
             dk_mode="-i"
         fi
         if [ x"$1" = x"psql" ]; then
-            dk_extra_args="$dk_extra_args -e TERM=${TERM} "
+            dk_extra_args="${dk_extra_args} -e TERM"
+            if [ -f "$HOME/.psql_history" ]; then
+                dk_extra_args="${dk_extra_args} -v ${HOME}/.psql_history:/root/.psql_history"
+            fi
             # dk_extra_args="${dk_extra_args} -e PAGER=/bin/less -v /usr/bin/less:/bin/less:ro"
+
+            # Force using psql (link pg_wrapper) to preload readline,
+            # otherwise line / completion is pretty fucked up.
+            cmd="/usr/bin/psql"
         fi
         echo docker run --rm ${dk_mode} --net=${dk_network} \
             -e PGHOST="${dk_db_name}" \
@@ -628,7 +636,7 @@ db_get_server_local_cmd() {
             -e PGPASSWORD="${CONF_RUNTIME_DOCKER_PGPASSWD}" \
             ${dk_extra_args} \
             ${CONF_RUNTIME_DOCKER_PGIMAGE} \
-            $1
+            ${cmd}
         return $TRUE
     elif ! db_get_server_is_local; then
         echo "$1";
