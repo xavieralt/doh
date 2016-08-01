@@ -668,7 +668,7 @@ db_config_local_server() {
             elog "Creating database container: ${dk_db_container_name}"
             docker run -d --name=${dk_db_container_name} \
                 --net=${dk_network} --net-alias=${dk_db_name} \
-                -v "${dk_db_container_name}-data:/var/lib/postgrseql/data" \
+                -v "${dk_db_container_name}-data:/var/lib/postgresql/data" \
                 -e POSTGRES_USER=${CONF_RUNTIME_DOCKER_PGUSER} \
                 -e POSTGRES_PASSWD=${CONF_RUNTIME_DOCKER_PGPASSWD} \
                 ${CONF_RUNTIME_DOCKER_PGIMAGE}
