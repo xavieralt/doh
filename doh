@@ -6,7 +6,7 @@ DOH_VERSION="0.5"
 #DOH_LOGFILE=/tmp/doh.$$.log
 DOH_LOGLEVEL="${DOH_LOGLEVEL:-info}"
 DOH_PROFILE_LOADED="0"
-DOH_PARTS="main addons extra client"
+DOH_PARTS="main addons extra enterprise client"
 DOH_USER_GLOBAL_CONFIG="$HOME/.config/doh"
 
 # HELPERS GLOBALS
@@ -1120,7 +1120,8 @@ doh_update_section() {
     doh_profile_load
 
     ([ x"${1,,}" != x"main" ] && [ x"${1,,}" != x"addons" ] \
-      && [ x"${1,,}" != x"extra" ] && [ x"${1,,}" != x"client" ]) && die "Invalid section ${section}"
+      && [ x"${1,,}" != x"extra" ] && [ x"${1,,}" != x"client" ] \
+      && [ x"${1,,}" != x"enterprise" ]) && die "Invalid section ${section}"
     [ x"$(conf_env_get "${1}")" != x"1" ] && return  # section is not defined
 
     local section="${1^^}"
@@ -1376,7 +1377,8 @@ doh_run_server_docker() {
         docker_args="${docker_args} -v $(readlink -f ${DIR_CONF}/odoo-server.conf):/etc/odoo/openerp-server.conf:ro"
     fi
 
-    local odoo_args="--addons-path=${DOH_DOCKER_VOLUMES_PATH}"
+    local odoo_args=${odoo_args:-}
+    odoo_args="${odoo_args} --addons-path=${DOH_DOCKER_VOLUMES_PATH}"
     if [[ x"${v}" =~ ^x(8.0) ]]; then
         # Odoo 8.0 does not support passing database args as environment
         # variable, force it args arguments
@@ -1403,7 +1405,7 @@ doh_run_server_docker() {
         fi
         opt_xmlrpc_port=${opt_xmlrpc_port:-8069}
     fi
-    docker_args="${docker_args} -p ${opt_xmlrpc_port}:${opt_xmlrpc_port}"
+    docker_args="${docker_args} -p 0.0.0.0:${opt_xmlrpc_port}:${opt_xmlrpc_port}"
 
     docker_network_create "${CONF_RUNTIME_DOCKER_NETWORK}"
     docker_volume_create "${CONF_RUNTIME_DOCKER_DATAVOLUME}"
@@ -2081,6 +2083,29 @@ HELP_CMD_COVERAGE
         elog "No modules specified, using config default: ${MODS}"
     fi
 
+    if [ x"$CONF_RUNTIME_DOCKER" != x"0" ]; then
+        local docker_image="odoo:${v}"
+        if [ -f ${DIR_EXTRA}/Dockerfile ]; then
+            docker_image="$(basename `readlink -f ${DIR_ROOT}`):latest"
+        fi
+        if [ x"${CONF_RUNTIME_DOCKER_IMAGE}" != x"" ]; then
+            docker_image=${CONF_RUNTIME_DOCKER_IMAGE}
+        fi
+
+        local docker_coverage_image="$(basename `readlink -f ${DIR_ROOT}`):coverage"
+        docker build -t "${docker_coverage_image}" - >/dev/null 2>/dev/null <<EOF
+FROM ${docker_image}
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc python-dev \
+    && easy_install coverage \
+    && apt-get purge -y gcc python-dev \
+    && apt-get autoremove -y
+USER odoo
+EOF
+    fi
+    COVERAGE_ARGS="--branch"
+    COVERAGE_REPORT_ARGS=""
     if [ x"${MODS}" != x"all" ]; then
         OLDIFS="${IFS}";
         IFS=","; for m in ${MODS}; do
@@ -2088,6 +2113,9 @@ HELP_CMD_COVERAGE
             for a in $DOH_ADDONS_PATH; do
                 if [ -d "${a}/${m}" ]; then
                     mpath="${a}/${m}"
+                    if [ "${CONF_RUNTIME_DOCKER}" != x"0" ]; then
+                        mpath="/mnt/$(basename ${a,,})/${m}"
+                    fi
                     break
                 fi
             done
@@ -2098,33 +2126,60 @@ HELP_CMD_COVERAGE
             if [ x"${MODS_REGEXP}" != x"" ]; then
                 MODS_REGEXP="${MODS_REGEXP},"
             fi
-            MODS_REGEXP="${MODS_REGEXP}${a}/${m}/*"
+            MODS_REGEXP="${MODS_REGEXP}${mpath}/*"
         done
         IFS="${OLDIFS}"
-        COVERAGE_ARGS="--include=${MODS_REGEXP} --omit=*/__init__.py,*/__openerp__.py,*/tests/*.py"
+        COVERAGE_REPORT_ARGS="${COVERAGE_REPORT_ARGS} --include=${MODS_REGEXP} --omit=*/__init__.py,*/__openerp__.py,*/tests/*.py"
     fi
 
-    rm -Rf "${DIR_RUN}/coverage"
-    mkdir -p "${DIR_RUN}/coverage"
-    local logfile="${DIR_RUN}/coverage/odoo.log"
+    rm -Rf "${DIR_ROOT}/coverage"
+    mkdir -p "${DIR_ROOT}/coverage"
+    if [ "${CONF_RUNTIME_DOCKER}" != x"0" ]; then
+        chmod o+rwx,g+ws "${DIR_ROOT}/coverage"
+    fi
+    local logfile="${DIR_ROOT}/coverage/odoo.log"
+    local COVERAGE_FILE="${DIR_ROOT}/coverage/run.coverage"
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
     if [[ x"${v}" =~ ^x(8.0|7.0|master)$ ]]; then
         edebug "Coverage server using: ${start} ${DIR_MAIN}/openerp-server -c ${DIR_CONF}/odoo-server.conf $@"
-        if [ x"${run_in_foreground}" = x"1" ]; then
-            exec 1>&6 6>&-
-            exec 2>&7 7>&-
-        else
-            exec > >(tee "${logfile}")
-            exec 2> >(tee "${logfile}" >&2)
+        if [ x"${DOH_LOGFILE}" != x"" ]; then
+            if [ x"${run_in_foreground}" = x"1" ]; then
+                exec 1>&6 6>&-
+                exec 2>&7 7>&-
+            else
+                exec > >(tee "${logfile}")
+                exec 2> >(tee "${logfile}" >&2)
+            fi
         fi
-        coverage run --branch --source="${DOH_ADDONS_PATH}" \
-            "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" \
-                --test-enable --log-level test --stop-after-init \
-                -d "${DB}" -u "${MODS}"
+        local SOURCES="${DOH_ADDONS_PATH}"
+        if [ "${CONF_RUNTIME_DOCKER}" != x"0" ]; then
+            SOURCES="${DOH_DOCKER_VOLUMES_PATH}"
+            COVERAGE_FILE="/mnt/coverage/run.coverage"
+            COVERAGE_CMD="coverage run"
+            ODOO_SERVER_CMD="/usr/bin/openerp-server"
+            DOCKER_COVERAGE_ARGS="${COVERAGE_ARGS}"
+            CONF_RUNTIME_DOCKER_IMAGE="${docker_coverage_image}" \
+            DOH_DOCKER_VOLUMES="${DOH_DOCKER_VOLUMES} -v ${DIR_ROOT}/coverage:/mnt/coverage -e COVERAGE_FILE=${COVERAGE_FILE}" \
+            odoo_args="${COVERAGE_CMD} --source=${SOURCES} ${DOCKER_COVERAGE_ARGS} ${ODOO_SERVER_CMD}" \
+                doh_run_server_docker \
+                    --test-enable --log-level=test --stop-after-init \
+                    -d "${DB}" -u "${MODS}"
+            # echo coverage run --branch --source="${SOURCES}" \
+            #     "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" \
+            #         --test-enable --log-level test --stop-after-init \
+            #         -d "${DB}" -u "${MODS}"
+        else
+            echo coverage run --branch --source="${SOURCES}" \
+                "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" \
+                    --test-enable --log-level test --stop-after-init \
+                    -d "${DB}" -u "${MODS}"
+        fi
         # restore initial config
-        exec > >(tee -a "${DOH_LOGFILE}")
-        exec 2> >(tee -a "${DOH_LOGFILE}" >&2)
+        if [ x"${DOH_LOGFILE}" != x"" ]; then
+            exec > >(tee -a "${DOH_LOGFILE}")
+            exec 2> >(tee -a "${DOH_LOGFILE}" >&2)
+        fi
     elif [[ x"${v}" =~ ^x(6.1|6.0)$ ]]; then
         die "Coverage is not active for 6.x odoo releases"
         # edebug "Coverage server using: ${start} ${DIR_MAIN}/bin/openerp-server.py -c ${DIR_CONF}/odoo-server.conf $@"
@@ -2137,9 +2192,22 @@ HELP_CMD_COVERAGE
         elog "Not generating html report, coverage was run in foreground and thus not logfile available"
     else
         elog "Generating html report"
-        exec 1>&6 6>&-
-        exec 2>&7 7>&-
-        coverage html ${COVERAGE_ARGS} -d "${DIR_RUN}/coverage"
+        if [ x"${DOH_LOGFILE}" != x"" ]; then
+            exec 1>&6 6>&-
+            exec 2>&7 7>&-
+        fi
+        if [ "${CONF_RUNTIME_DOCKER}" != x"0" ]; then
+            COVERAGE_FILE="/mnt/coverage/run.coverage"
+            erun --show docker run --rm -it \
+                ${DOH_DOCKER_VOLUMES} \
+                -v ${DIR_ROOT}/coverage:/mnt/coverage \
+                -e COVERAGE_FILE=${COVERAGE_FILE} \
+                ${docker_coverage_image} \
+                coverage html ${COVERAGE_REPORT_ARGS} \
+                    -d "/mnt/coverage/html"
+        else
+            coverage html ${COVERAGE_REPORT} -d "${DIR_RUN}/coverage"
+        fi
 
         grep -P "^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ (?:ERROR|CRITICAL) )|(?:Traceback \(most recent call last\):)$" ${DIR_RUN}/coverage/odoo.log>/dev/null
         if [ $? -eq 0 ]; then
