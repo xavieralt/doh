@@ -6,7 +6,7 @@ DOH_VERSION="0.5"
 #DOH_LOGFILE=/tmp/doh.$$.log
 DOH_LOGLEVEL="${DOH_LOGLEVEL:-info}"
 DOH_PROFILE_LOADED="0"
-DOH_PARTS="main addons extra enterprise client"
+DOH_PARTS="main addons extra enterprise themes client"
 DOH_USER_GLOBAL_CONFIG="$HOME/.config/doh"
 
 # HELPERS GLOBALS
@@ -616,7 +616,7 @@ db_get_server_local_cmd() {
         local dk_db_container_name="${dk_network}-${dk_db_name}"
         local dk_extra_args="${DOH_DOCKER_CMD_EXTRA:-}"
         local dk_mode="-it"
-        if [ x"${DOH_DOCHER_NO_TTY}" = x"1" ]; then
+        if [ x"${DOH_DOCKER_NO_TTY}" = x"1" ] || [ ! -t 0 ]; then
             dk_mode="-i"
         fi
         if [ x"$1" = x"psql" ]; then
@@ -840,6 +840,7 @@ doh_profile_load() {
     export DIR_ADDONS="${ROOT}/main/addons"
     export DIR_EXTRA="${ROOT}/extra"
     export DIR_ENTERPRISE="${ROOT}/enterprise"
+    export DIR_THEMES="${ROOT}/themes"
     export DIR_CLIENT="${ROOT}/client"
     export DIR_CONF="${ROOT}/conf"
     export DIR_LOGS="${ROOT}/logs"
@@ -926,9 +927,9 @@ doh_profile_load() {
     fi
 
     local ADDONS_PATH=""
-    local DOCKER_VOLUMES=""
+    local DOCKER_VOLUMES=${DOCKER_VOLUMES:-}
     local DOCKER_VOLUMES_PATH=""
-    for part in EXTRA ENTERPRISE ADDONS; do
+    for part in EXTRA ENTERPRISE ADDONS THEMES; do
         local v="CONF_$part";
         local d="DIR_$part";
         local part_path="";
@@ -981,6 +982,19 @@ doh_profile_load() {
         fi
     fi
 
+    local v="${CONF_PROFILE_VERSION:-8.0}"
+    if [[ x"${v}" =~ ^x(10.0|master)$ ]]; then
+        export CONF_SERVER_RCFILE="odoo.conf"
+        export CONF_SERVER_CMD="odoo"
+        export CONF_SERVER_CMDDEV="odoo-bin"
+        export CONF_SERVER_PKGDIR="odoo"
+    else
+        export CONF_SERVER_RCFILE="openerp-server.conf"
+        export CONF_SERVER_CMD="openerp-server"
+        export CONF_SERVER_CMDDEV="openerp-server"
+        export CONF_SERVER_PKGDIR="openerp"
+    fi
+
     DOH_PROFILE_LOADED="1"
 }
 
@@ -992,7 +1006,7 @@ doh_reconfigure() {
     local stage="${1:-all}"
 
     if [[ "${stage}" =~ ^(pre|all)$ ]]; then
-        doh_check_bootstrap_depends
+        # doh_check_bootstrap_depends
 
         # check run-as user
         runas_entry=$(getent passwd "${CONF_PROFILE_RUNAS}")
@@ -1013,9 +1027,9 @@ doh_reconfigure() {
     fi
 
     if [[ "${stage}" =~ ^(post|all) ]]; then
-        doh_check_odoo_depends
+        # doh_check_odoo_depends
 
-        db_config_local_server
+        # db_config_local_server
 
         doh_generate_server_config_file
 
@@ -1121,7 +1135,8 @@ doh_update_section() {
 
     ([ x"${1,,}" != x"main" ] && [ x"${1,,}" != x"addons" ] \
       && [ x"${1,,}" != x"extra" ] && [ x"${1,,}" != x"client" ] \
-      && [ x"${1,,}" != x"enterprise" ]) && die "Invalid section ${section}"
+      && [ x"${1,,}" != x"enterprise" ] && [ x"${1,,}" != x"themes" ]
+      ) && die "Invalid section ${section}"
     [ x"$(conf_env_get "${1}")" != x"1" ] && return  # section is not defined
 
     local section="${1^^}"
@@ -1313,9 +1328,9 @@ doh_run_server() {
 	start="sudo -u ${CONF_PROFILE_RUNAS}"
     fi
 
-    if [[ x"${v}" =~ ^x(9.0|8.0|7.0|master)$ ]]; then
-        edebug "Starting server using: ${start} ${DIR_MAIN}/openerp-server -c ${DIR_CONF}/odoo-server.conf $@"
-        ${start} "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" "$@"
+    if [[ x"${v}" =~ ^x(10.0|9.0|8.0|7.0|master)$ ]]; then
+        edebug "Starting server using: ${start} ${DIR_MAIN}/${CONF_SERVER_CMDDEV} -c ${DIR_CONF}/odoo-server.conf $@"
+        ${start} "${DIR_MAIN}/${CONF_SERVER_CMDDEV}" -c "${DIR_CONF}/odoo-server.conf" "$@"
     elif [[ x"${v}" =~ ^x(6.1|6.0)$ ]]; then
         edebug "Starting server using: ${start} ${DIR_MAIN}/bin/openerp-server.py -c ${DIR_CONF}/odoo-server.conf $@"
         ${start} "${DIR_MAIN}/bin/openerp-server.py" -c "${DIR_CONF}/odoo-server.conf" "$@"
@@ -1349,8 +1364,15 @@ doh_run_server_docker() {
     doh_profile_load
     doh_check_dirs
 
+    CONF_RUNTIME_DOCKER_RAW_ARGS="0"
+    if [ x"$1" = x"--raw" ]; then
+        CONF_RUNTIME_DOCKER_RAW_ARGS="1";
+        DOH_DOCKER_NO_OPTS="1"
+        shift;
+    fi
+
     local v="${CONF_PROFILE_VERSION:-8.0}"
-    if ! [[ x"${v}" =~  ^x(9.0|8.0|master) ]]; then
+    if ! [[ x"${v}" =~  ^x(10.0|9.0|8.0|7.0|master) ]]; then
         die "Docker runtime only supportted work for odoo 8.0 and later"
     fi
 
@@ -1374,10 +1396,14 @@ doh_run_server_docker() {
 
     local docker_args="${DOH_DOCKER_VOLUMES}"
     if [ -f "${DIR_CONF}/odoo-server.conf" ]; then
-        docker_args="${docker_args} -v $(readlink -f ${DIR_CONF}/odoo-server.conf):/etc/odoo/openerp-server.conf:ro"
+        docker_args="${docker_args} -v $(readlink -f ${DIR_CONF}/odoo-server.conf):/etc/odoo/${CONF_SERVER_RCFILE}:ro"
+    fi
+    if [ x"$v" = x"7.0" ]; then
+        docker_args="${docker_args} -e OE_SESSIONS_PATH=/var/lib/openerp"
     fi
 
     local odoo_args=${odoo_args:-}
+    local odoo_subcommand=""
     odoo_args="${odoo_args} --addons-path=${DOH_DOCKER_VOLUMES_PATH}"
     if [[ x"${v}" =~ ^x(8.0) ]]; then
         # Odoo 8.0 does not support passing database args as environment
@@ -1386,7 +1412,11 @@ doh_run_server_docker() {
         odoo_args="${odoo_args} --db_user=${CONF_RUNTIME_DOCKER_PGUSER}"
         odoo_args="${odoo_args} --db_password=${CONF_RUNTIME_DOCKER_PGPASSWD}"
     fi
-
+    if [ x"${DOH_DOCKER_NO_OPTS}" = x"1" ]; then
+        # do not provide automatic config option to odoo
+        # (this is used for scafolding)
+        odoo_args=""
+    fi
     local arg;
     local opt_xmlrpc_port="";
     for arg in "$@"; do
@@ -1397,6 +1427,9 @@ doh_run_server_docker() {
             opt_xmlrpc_port="${arg#*=}"
         elif [ x"${arg}" = x"--xmlrpc-port" ]; then
             opt_xmlrpc_port="+"
+        elif [ x"${arg}" = x"--no-xmlrpc" ]; then
+            opt_xmlrpc_port=""
+            DOH_DOCKER_NO_PUBLISH=1
         fi
     done
     if [ $((${opt_xmlrpc_port} + 0)) -eq 0 ]; then
@@ -1405,19 +1438,44 @@ doh_run_server_docker() {
         fi
         opt_xmlrpc_port=${opt_xmlrpc_port:-8069}
     fi
-    docker_args="${docker_args} -p 0.0.0.0:${opt_xmlrpc_port}:${opt_xmlrpc_port}"
+    if [ x"${DOH_DOCKER_NO_PUBLISH}" != x"1" ]; then
+        docker_args="${docker_args} -p 0.0.0.0:${opt_xmlrpc_port}:${opt_xmlrpc_port}"
+        if (echo "$@" | grep -- "--workers=" -); then
+            docker_args="${docker_args} -p 0.0.0.0:8072:8072"
+        fi
+    fi
+    docker_args="${docker_args} ${DOH_DOCKER_EXTRA_ARGS}"
+
+    local datavolume_ctpath="/var/lib/odoo"
+    if [ x"$v" = x"7.0" ]; then
+        datavolume_ctpath="/var/lib/openerp"
+    fi
+
+    local docker_interactive="-it"
+    if [ ! -t 0 ]; then
+        edebug "Running in no TTY-mode"
+        docker_interactive="-i"
+    fi
+
+    if [ x"$1" = x"--" ]; then
+        if [ x"$2" = x"shell" ]; then
+            odoo_subcommand="-- shell"
+            shift 2;
+        fi
+    fi
 
     docker_network_create "${CONF_RUNTIME_DOCKER_NETWORK}"
     docker_volume_create "${CONF_RUNTIME_DOCKER_DATAVOLUME}"
-    erun --show docker run --rm -it \
+    erun --show docker run --rm ${docker_interactive} \
         --net=${CONF_RUNTIME_DOCKER_NETWORK} \
         -e PGHOST=${CONF_RUNTIME_DOCKER_PGHOST} \
         -e PGUSER=${CONF_RUNTIME_DOCKER_PGUSER} \
         -e PGPASSWORD=${CONF_RUNTIME_DOCKER_PGPASSWD} \
-        -v ${CONF_RUNTIME_DOCKER_DATAVOLUME}:/var/lib/odoo \
+        -v ${CONF_RUNTIME_DOCKER_DATAVOLUME}:${datavolume_ctpath} \
         ${docker_args} \
-        -v $(readlink -f ${DIR_MAIN})/openerp:/usr/lib/python2.7/dist-packages/openerp:ro \
+        -v $(readlink -f ${DIR_MAIN})/${CONF_SERVER_PKGDIR}:/usr/lib/python2.7/dist-packages/${CONF_SERVER_PKGDIR}:ro \
         ${docker_image} \
+        ${odoo_subcommand} \
         ${odoo_args} \
         "$@"
 
@@ -1513,6 +1571,8 @@ Development commands:
 
   run           run odoo server in foreground
   coverage      run odoo server in coverage mode
+  scaffold      create a new module based on a template
+  shell         get an odoo shell prompt
 
 Service commands
 
@@ -1630,16 +1690,33 @@ HELP_CMD_SCAFFOLD
     doh_profile_load "${conffile}"
 
     # set stdout/stderr to terminal pty
-    exec 1>&6 6>&-
-    exec 2>&7 7>&-
-
-    local v="${CONF_PROFILE_VERSION:-8.0}"
-    if [[ x"${v}" =~ ^x(8.0|master)$ ]]; then
-        edebug "Starting server using: ${start} ${DIR_MAIN}/openerp-server --addons-path=${DOH_ADDONS_PATH} scaffold $@"
-        ${start} "${DIR_MAIN}/openerp-server" "--addons-path=${DOH_ADDONS_PATH}" scaffold "$@"
-    else
-        error "Sorry, scaffold in not available for your server version"
+    if [ x"${DOH_LOGFILE}" != x"" ]; then
+        exec 1>&6 6>&-
+        exec 2>&7 7>&-
     fi
+
+    DOH_DOCKER_NO_PUBLISH=1 DOH_DOCKER_NO_OPTS=1 \
+        doh_run_server -- scaffold "$@"
+}
+
+cmd_shell() {
+: <<HELP_CMD_SHELL
+doh shell
+
+Get an Odoo shell promt.
+
+HELP_CMD_SHELL
+    local conffile=$(doh_profile_find)
+    doh_profile_load "${conffile}"
+
+    # set stdout/stderr to terminal pty
+    if [ x"${DOH_LOGFILE}" != x"" ]; then
+        exec 1>&6 6>&-
+        exec 2>&7 7>&-
+    fi
+
+    DOH_DOCKER_NO_PUBLISH=1 \
+        doh_run_server -- shell "$@"
 }
 
 cmd_init() {
@@ -1932,14 +2009,27 @@ HELP_CMD_DROP_DB
         echo "Usage: doh drop-db: missing arguments -- NAME"
         cmd_help "drop_db"
     fi
-    local dropdb=$(db_get_server_local_cmd "dropdb")
-    DB="$1"
 
-    doh_profile_load
-    db_client_setup_env
-    doh_svc_stop
-    elog "droping database ${DB}"
-    erunquiet ${dropdb} "${DB}" || die "Unable to drop database ${DB}"
+    doh_profile_load --user-profile-only
+    if [ x"${CONF_RUNTIME_DOCKER}" != x"0" ]; then
+        export DOH_PROFILE_LOADED="1"
+    else
+        # Load infos from profile if not running in docker context
+        doh_profile_load
+        db_client_setup_env
+        doh_svc_stop
+    fi
+
+    local dropdb=$(db_get_server_local_cmd "dropdb")
+    local psql=$(db_get_server_local_cmd "psql")
+
+    for DB in $@; do
+        DB_COUNT=$(erun --show ${psql} "postgres" -A --tuples-only -c "SELECT 1 FROM pg_database WHERE datname = '${DB}'" | wc -l)
+        if [ ${DB_COUNT} -gt 0 ]; then
+            elog "droping database ${DB}"
+            erunquiet ${dropdb} "${DB}" || die "Unable to drop database ${DB}"
+        fi
+    done
 }
 
 cmd_copy_db() {
@@ -1967,13 +2057,19 @@ cmd_sql() {
 doh sql ARG...
 
 HELP_CMD_SQL
-    if [ ! -t 0 ]; then
-        export DOH_DOCHER_NO_TTY=1
+    doh_profile_load --user-profile-only
+    if [ x"${CONF_RUNTIME_DOCKER}" != x"0" ]; then
+        export DOH_PROFILE_LOADED="1"
+        if [ ! -t 0 ] || [ ! -t 1 ]; then
+            export DOH_DOCKER_NO_TTY=1
+        fi
+    else
+        # Load infos from profile if not running in docker context
+        doh_profile_load
+        db_client_setup_env
     fi
-    local psql=$(db_get_server_local_cmd "psql")
 
-    doh_profile_load
-    db_client_setup_env
+    local psql=$(db_get_server_local_cmd "psql")
     erun --show ${psql} "$@"
 }
 
@@ -2093,14 +2189,23 @@ HELP_CMD_COVERAGE
         fi
 
         local docker_coverage_image="$(basename `readlink -f ${DIR_ROOT}`):coverage"
-        docker build -t "${docker_coverage_image}" - >/dev/null 2>/dev/null <<EOF
+        if [ `docker image ls --format='{{.Repository}}:{{.Tag}}' | grep "${docker_coverage_image}:coverage" | wc -l` -lt 1 ]; then
+            ewarn "Building docker image for coverage: ${docker_coverage_image}:coverage"
+        fi
+        docker build -t "${docker_coverage_image}" - 2>/dev/null <<EOF
 FROM ${docker_image}
 USER root
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc python-dev \
+    && apt-get install -y --no-install-recommends gcc python-dev bzip2 \
     && easy_install coverage \
     && apt-get purge -y gcc python-dev \
     && apt-get autoremove -y
+RUN set -x; \
+    curl -sSL -o phantomjs.tar.bz2 https://bitbucket.org/ariya/phantomjs/downloads/phantomjs-2.1.1-linux-x86_64.tar.bz2 \
+    && echo 'f8afc8a24eec34c2badccc93812879a3d6f2caf3 phantomjs.tar.bz2' | sha1sum -c - \
+    && tar xjf phantomjs.tar.bz2 \
+    && mv ./phantomjs-2.1.1-linux-x86_64/bin/phantomjs /usr/local/bin \
+    && rm -Rf phantomjs.tar.bz2 ./phantomjs-2.1.1-linux-x86_64
 USER odoo
 EOF
     fi
@@ -2129,10 +2234,10 @@ EOF
             MODS_REGEXP="${MODS_REGEXP}${mpath}/*"
         done
         IFS="${OLDIFS}"
-        COVERAGE_REPORT_ARGS="${COVERAGE_REPORT_ARGS} --include=${MODS_REGEXP} --omit=*/__init__.py,*/__openerp__.py,*/tests/*.py"
+        COVERAGE_REPORT_ARGS="${COVERAGE_REPORT_ARGS} --include=${MODS_REGEXP} --omit=*/migrations/*,*/__openerp__.py,*/__manifest__.py" #--omit=*/__init__.py,*/__openerp__.py,*/__manifest__.py,*/tests/*.py"
     fi
 
-    rm -Rf "${DIR_ROOT}/coverage"
+    # rm -Rf "${DIR_ROOT}/coverage"
     mkdir -p "${DIR_ROOT}/coverage"
     if [ "${CONF_RUNTIME_DOCKER}" != x"0" ]; then
         chmod o+rwx,g+ws "${DIR_ROOT}/coverage"
@@ -2141,8 +2246,8 @@ EOF
     local COVERAGE_FILE="${DIR_ROOT}/coverage/run.coverage"
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
-    if [[ x"${v}" =~ ^x(8.0|7.0|master)$ ]]; then
-        edebug "Coverage server using: ${start} ${DIR_MAIN}/openerp-server -c ${DIR_CONF}/odoo-server.conf $@"
+    if [[ x"${v}" =~ ^x(10.0|9.0|8.0|7.0|master)$ ]]; then
+        edebug "Coverage server using: ${start} ${DIR_MAIN}/${CONF_SERVER_CMDDEV} -c ${DIR_CONF}/odoo-server.conf $@"
         if [ x"${DOH_LOGFILE}" != x"" ]; then
             if [ x"${run_in_foreground}" = x"1" ]; then
                 exec 1>&6 6>&-
@@ -2157,21 +2262,22 @@ EOF
             SOURCES="${DOH_DOCKER_VOLUMES_PATH}"
             COVERAGE_FILE="/mnt/coverage/run.coverage"
             COVERAGE_CMD="coverage run"
-            ODOO_SERVER_CMD="/usr/bin/openerp-server"
+            ODOO_SERVER_CMD="/usr/bin/${CONF_SERVER_CMD}"
             DOCKER_COVERAGE_ARGS="${COVERAGE_ARGS}"
             CONF_RUNTIME_DOCKER_IMAGE="${docker_coverage_image}" \
-            DOH_DOCKER_VOLUMES="${DOH_DOCKER_VOLUMES} -v ${DIR_ROOT}/coverage:/mnt/coverage -e COVERAGE_FILE=${COVERAGE_FILE}" \
+            DOH_DOCKER_VOLUMES="${DOH_DOCKER_VOLUMES} -v $(readlink -e ${DIR_ROOT})/coverage:/mnt/coverage -e COVERAGE_FILE=${COVERAGE_FILE}" \
+            DOH_DOCKER_NO_PUBLISH="1"
             odoo_args="${COVERAGE_CMD} --source=${SOURCES} ${DOCKER_COVERAGE_ARGS} ${ODOO_SERVER_CMD}" \
                 doh_run_server_docker \
                     --test-enable --log-level=test --stop-after-init \
-                    -d "${DB}" -u "${MODS}"
+                    -d "${DB}" -i "${MODS}"
             # echo coverage run --branch --source="${SOURCES}" \
             #     "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" \
             #         --test-enable --log-level test --stop-after-init \
             #         -d "${DB}" -u "${MODS}"
         else
             echo coverage run --branch --source="${SOURCES}" \
-                "${DIR_MAIN}/openerp-server" -c "${DIR_CONF}/odoo-server.conf" \
+                "${DIR_MAIN}/${CONF_SERVER_CMDDEV}" -c "${DIR_CONF}/odoo-server.conf" \
                     --test-enable --log-level test --stop-after-init \
                     -d "${DB}" -u "${MODS}"
         fi
@@ -2198,9 +2304,14 @@ EOF
         fi
         if [ "${CONF_RUNTIME_DOCKER}" != x"0" ]; then
             COVERAGE_FILE="/mnt/coverage/run.coverage"
-            erun --show docker run --rm -it \
+            local docker_interactive="-it"
+            if [ ! -t 0 ]; then
+                edebug "Running in non TTY-mode"
+                docker_interactive="-i"
+            fi
+            erun --show docker run --rm ${docker_interactive} \
                 ${DOH_DOCKER_VOLUMES} \
-                -v ${DIR_ROOT}/coverage:/mnt/coverage \
+                -v "$(readlink -e ${DIR_ROOT})/coverage:/mnt/coverage" \
                 -e COVERAGE_FILE=${COVERAGE_FILE} \
                 ${docker_coverage_image} \
                 coverage html ${COVERAGE_REPORT_ARGS} \
@@ -2209,10 +2320,12 @@ EOF
             coverage html ${COVERAGE_REPORT} -d "${DIR_RUN}/coverage"
         fi
 
-        grep -P "^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ (?:ERROR|CRITICAL) )|(?:Traceback \(most recent call last\):)$" ${DIR_RUN}/coverage/odoo.log>/dev/null
-        if [ $? -eq 0 ]; then
-            elog "Some errors occurreds, see below"
-            grep -P "^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ (?:ERROR|CRITICAL) )|(?:Traceback \(most recent call last\):)$" ${DIR_RUN}/coverage/odoo.log
+        if [ -f ${DIR_RUN}/coverage/odoo.log ]; then
+            grep -P "^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ (?:ERROR|CRITICAL) )|(?:Traceback \(most recent call last\):)$" ${DIR_RUN}/coverage/odoo.log>/dev/null
+            if [ $? -eq 0 ]; then
+                elog "Some errors occurreds, see below"
+                grep -P "^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d{3} \d+ (?:ERROR|CRITICAL) )|(?:Traceback \(most recent call last\):)$" ${DIR_RUN}/coverage/odoo.log
+            fi
         fi
     fi
     # exec 1>&6 6>&-
