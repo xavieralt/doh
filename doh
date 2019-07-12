@@ -896,6 +896,7 @@ doh_profile_load() {
     fi
     OLDIFS="${IFS}"
     SECTIONS=$(conf_file_get_sections "${DIR_ROOT}/odoo.profile")
+    local EXTRA_PARTS=""
     for section in ${SECTIONS}; do
         if [ x"${section}" = x"server" ]; then
             continue  # server section contain only odoo-server.conf options
@@ -908,6 +909,10 @@ doh_profile_load() {
             export CONF_${section^^}_${var_name^^}="${var_value}"
         done <<< "${VARS}"
         IFS="$OLDIFS"
+        if [ x"${section:0:5}" = x"extra" ] && [ x"${section}" != x"extra" ]; then
+            EXTRA_PARTS=" ${EXTRA_PARTS} ${section^^}"
+            export DIR_${section^^}="${ROOT}/${section}"
+        fi
     done
 
     if [ x"${CONF_MAIN}" = x"" ]; then
@@ -931,7 +936,7 @@ doh_profile_load() {
     local ADDONS_PATH=""
     local DOCKER_VOLUMES=${DOCKER_VOLUMES:-}
     local DOCKER_VOLUMES_PATH=""
-    for part in EXTRA ENTERPRISE ADDONS THEMES; do
+    for part in  ${EXTRA_PARTS} EXTRA ENTERPRISE ADDONS THEMES; do
         local v="CONF_$part";
         local d="DIR_$part";
         local part_path="";
