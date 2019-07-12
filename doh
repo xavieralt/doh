@@ -417,6 +417,8 @@ helper_is_dir_repo() {
 
     if [ -d "${dir_path}" ] && [ -d "${dir_repo_path}" ]; then
         return $TRUE
+    elif [ -f "${dir_repo_path}" ] && grep -q -E "^gitdir: .*worktrees.*" "${dir_repo_path}"; then
+        return $TRUE  # this a worktree instance
     else
         return $FALSE
     fi
