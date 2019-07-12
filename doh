@@ -7,7 +7,8 @@ DOH_VERSION="0.5"
 DOH_LOGLEVEL="${DOH_LOGLEVEL:-info}"
 DOH_PROFILE_LOADED="0"
 DOH_PARTS="main addons extra enterprise themes client"
-DOH_USER_GLOBAL_CONFIG="$HOME/.config/doh"
+DOH_USER_GLOBAL_CONFIG_DIR="${HOME}/.config/doh"
+DOH_USER_GLOBAL_CONFIG="${DOH_USER_GLOBAL_CONFIG_DIR}/config"
 
 # HELPERS GLOBALS
 declare -A GITLAB_CACHED_AUTH_TOKENS
@@ -852,6 +853,11 @@ doh_profile_load() {
         export DIR_CONF="${ROOT}"
     fi
 
+    # force creation of user config dir
+    if [ ! -e "${DOH_USER_GLOBAL_CONFIG_DIR}" ]; then
+        mkdir -p 0700 "${DOH_USER_GLOBAL_CONFIG_DIR}"
+    fi
+
     # load user global config
     if [ -f "${DOH_USER_GLOBAL_CONFIG}" ]; then
         edebug "loading user global profile"
@@ -1659,8 +1665,7 @@ HELP_CMD_CONFIG
     if [ x"${user_global_file}" = x"1" ]; then
         local conffile="${DOH_USER_GLOBAL_CONFIG}"
         if [ ! -e "${DOH_USER_GLOBAL_CONFIG}" ]; then
-            local user_config_dir=$(dirname "${DOH_USER_GLOBAL_CONFIG}")
-            mkdir -p "${user_config_dir}"
+            mkdir -m 700 -p "${DOH_USER_GLOBAL_CONFIG_DIR}"
             touch "${DOH_USER_GLOBAL_CONFIG}"
         fi
     else
