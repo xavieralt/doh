@@ -2206,11 +2206,14 @@ HELP_CMD_COVERAGE
             docker_image=${CONF_RUNTIME_DOCKER_IMAGE}
         fi
 
-        local docker_coverage_image="$(basename `readlink -f ${DIR_ROOT}`):coverage"
-        if [ `docker image ls --format='{{.Repository}}:{{.Tag}}' | grep "${docker_coverage_image}:coverage" | wc -l` -lt 1 ]; then
-            ewarn "Building docker image for coverage: ${docker_coverage_image}:coverage"
-        fi
-        docker build -t "${docker_coverage_image}" - 2>/dev/null <<EOF
+        if [ x"${CONF_RUNTIME_DOCKER_COVERAGE_IMAGE}" != x"" ]; then
+            local docker_coverage_image=${CONF_RUNTIME_DOCKER_COVERAGE_IMAGE}
+        else
+            local docker_coverage_image="$(basename `readlink -f ${DIR_ROOT}`):coverage"
+            if [ `docker image ls --format='{{.Repository}}:{{.Tag}}' | grep "${docker_coverage_image}:coverage" | wc -l` -lt 1 ]; then
+                ewarn "Building docker image for coverage: ${docker_coverage_image}:coverage"
+            fi
+            docker build -t "${docker_coverage_image}" - 2>/dev/null <<EOF
 FROM ${docker_image}
 USER root
 RUN apt-get update \
@@ -2226,6 +2229,7 @@ RUN set -x; \
     && rm -Rf phantomjs.tar.bz2 ./phantomjs-2.1.1-linux-x86_64
 USER odoo
 EOF
+        fi
     fi
     COVERAGE_ARGS="--branch"
     COVERAGE_REPORT_ARGS=""
