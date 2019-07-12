@@ -1573,6 +1573,7 @@ Availables options
 
   --self-upgrade    self-update doh to latest version
   --version         display doh version
+  -h, --help        display this help message
 
 Available commands
 
@@ -2467,6 +2468,9 @@ case $CMD in
         ;;
     --version)
         echo "doh v${DOH_VERSION}"
+        ;;
+    -h|--help)
+        cmd_help
         ;;
     *)
         doh_setup_logging
