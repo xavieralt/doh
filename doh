@@ -2028,7 +2028,7 @@ HELP_CMD_DROP_DB
         cmd_help "drop_db"
     fi
 
-    doh_profile_load --user-profile-only
+    doh_profile_load
     if [ x"${CONF_RUNTIME_DOCKER}" != x"0" ]; then
         export DOH_PROFILE_LOADED="1"
     else
@@ -2075,7 +2075,7 @@ cmd_sql() {
 doh sql ARG...
 
 HELP_CMD_SQL
-    doh_profile_load --user-profile-only
+    doh_profile_load
     if [ x"${CONF_RUNTIME_DOCKER}" != x"0" ]; then
         export DOH_PROFILE_LOADED="1"
         if [ ! -t 0 ] || [ ! -t 1 ]; then
