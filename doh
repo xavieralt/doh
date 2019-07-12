@@ -990,7 +990,7 @@ doh_profile_load() {
     fi
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
-    if [[ x"${v}" =~ ^x(10.0|master)$ ]]; then
+    if [[ x"${v}" =~ ^x(12.0|11.0|10.0|master)$ ]]; then
         export CONF_SERVER_RCFILE="odoo.conf"
         export CONF_SERVER_CMD="odoo"
         export CONF_SERVER_CMDDEV="odoo-bin"
@@ -1335,7 +1335,7 @@ doh_run_server() {
 	start="sudo -u ${CONF_PROFILE_RUNAS}"
     fi
 
-    if [[ x"${v}" =~ ^x(10.0|9.0|8.0|7.0|master)$ ]]; then
+    if [[ x"${v}" =~ ^x(12.0|11.0|10.0|9.0|8.0|7.0|master)$ ]]; then
         edebug "Starting server using: ${start} ${DIR_MAIN}/${CONF_SERVER_CMDDEV} -c ${DIR_CONF}/odoo-server.conf $@"
         ${start} "${DIR_MAIN}/${CONF_SERVER_CMDDEV}" -c "${DIR_CONF}/odoo-server.conf" "$@"
     elif [[ x"${v}" =~ ^x(6.1|6.0)$ ]]; then
@@ -1379,7 +1379,7 @@ doh_run_server_docker() {
     fi
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
-    if ! [[ x"${v}" =~  ^x(10.0|9.0|8.0|7.0|master) ]]; then
+    if ! [[ x"${v}" =~  ^x(12.0|11.0|10.0|9.0|8.0|7.0|master) ]]; then
         die "Docker runtime only supportted work for odoo 8.0 and later"
     fi
 
@@ -1471,16 +1471,22 @@ doh_run_server_docker() {
         fi
     fi
 
+    local distpkg_path="/usr/lib/python2.7/dist-packages"
+    if [[ x"${v}" =~  ^x(12.0|11.0|master) ]]; then
+        distpkg_path="/usr/lib/python3/dist-packages"
+    fi
+
     docker_network_create "${CONF_RUNTIME_DOCKER_NETWORK}"
     docker_volume_create "${CONF_RUNTIME_DOCKER_DATAVOLUME}"
     erun --show docker run --rm ${docker_interactive} \
         --net=${CONF_RUNTIME_DOCKER_NETWORK} \
+        -e DB_PORT_5432_TCP_ADDR=${CONF_RUNTIME_DOCKER_PGHOST} \
         -e PGHOST=${CONF_RUNTIME_DOCKER_PGHOST} \
         -e PGUSER=${CONF_RUNTIME_DOCKER_PGUSER} \
         -e PGPASSWORD=${CONF_RUNTIME_DOCKER_PGPASSWD} \
         -v ${CONF_RUNTIME_DOCKER_DATAVOLUME}:${datavolume_ctpath} \
         ${docker_args} \
-        -v $(readlink -f ${DIR_MAIN})/${CONF_SERVER_PKGDIR}:/usr/lib/python2.7/dist-packages/${CONF_SERVER_PKGDIR}:ro \
+        -v $(readlink -f ${DIR_MAIN})/${CONF_SERVER_PKGDIR}:${distpkg_path}/${CONF_SERVER_PKGDIR}:ro \
         ${docker_image} \
         ${odoo_subcommand} \
         ${odoo_args} \
@@ -2253,7 +2259,7 @@ EOF
     local COVERAGE_FILE="${DIR_ROOT}/coverage/run.coverage"
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
-    if [[ x"${v}" =~ ^x(10.0|9.0|8.0|7.0|master)$ ]]; then
+    if [[ x"${v}" =~ ^x(12.0|11.0|10.0|9.0|8.0|7.0|master)$ ]]; then
         edebug "Coverage server using: ${start} ${DIR_MAIN}/${CONF_SERVER_CMDDEV} -c ${DIR_CONF}/odoo-server.conf $@"
         if [ x"${DOH_LOGFILE}" != x"" ]; then
             if [ x"${run_in_foreground}" = x"1" ]; then
