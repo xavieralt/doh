@@ -1236,8 +1236,8 @@ doh_update_section() {
             erun git -C "${section_dir}" reset --hard "origin/${section_branch}"
             erun git -C "${section_dir}" checkout -f "${section_branch}"
         elif [ x$(git -C "${section_dir}" config branch.${section_current_branch}.rebase) = x"true" ]; then
-            edebug "update-section ${section_name}: rebasing onto branch ${section_branch}"
-            erun git -C "${section_dir}" rebase "${section_branch}"
+            edebug "update-section ${section_name}: rebasing onto branch origin/${section_branch}"
+            erun git -C "${section_dir}" rebase "origin/${section_branch}"
         else
             edebug "update-section ${section_name}: merging with last head"
             erun git -C "${section_dir}" merge FETCH_HEAD
