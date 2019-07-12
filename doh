@@ -624,9 +624,10 @@ db_get_server_local_cmd() {
         fi
         if [ x"$1" = x"psql" ]; then
             dk_extra_args="${dk_extra_args} -e TERM"
-            if [ -f "$HOME/.psql_history" ]; then
-                dk_extra_args="${dk_extra_args} -v ${HOME}/.psql_history:/root/.psql_history"
+            if [ ! -e "${DOH_USER_GLOBAL_CONFIG_DIR}/.sql_history" ]; then
+                mkdir -m 0700 "${DOH_USER_GLOBAL_CONFIG_DIR}/.sql_history"
             fi
+            dk_extra_args="${dk_extra_args} -v ${DOH_USER_GLOBAL_CONFIG_DIR}/sql_history:/root/.sql_history -e PSQL_HISTORY=/root/.sql_history/psql_history"
             # dk_extra_args="${dk_extra_args} -e PAGER=/bin/less -v /usr/bin/less:/bin/less:ro"
 
             # Force using psql (link pg_wrapper) to preload readline,
