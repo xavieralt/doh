@@ -1460,6 +1460,11 @@ doh_run_server_docker() {
     fi
     docker_args="${docker_args} ${DOH_DOCKER_EXTRA_ARGS}"
 
+    if [ x"${DOH_CMD_RUN_USAGE}" = x"launch-instance" ]; then
+        # doh run should set container name to 'odoo-${CONF_PROFILE_NAME}'
+        docker_args="${docker_args} --name=odoo-${CONF_PROFILE_NAME}"
+    fi
+
     local datavolume_ctpath="/var/lib/odoo"
     if [ x"$v" = x"7.0" ]; then
         datavolume_ctpath="/var/lib/openerp"
@@ -2371,7 +2376,8 @@ HELP_CMD_RUN
         exec 1>&6 6>&-
         exec 2>&7 7>&-
     fi
-    doh_run_server "$@"
+    DOH_CMD_RUN_USAGE="launch-instance" \
+        doh_run_server "$@"
 }
 
 cmd_start() {
