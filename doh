@@ -425,6 +425,12 @@ helper_is_dir_repo() {
     fi
 }
 
+doh_list_odoo_modules() {
+    # $1: addons path
+    # output: list of Odoo modules path found
+    find ${1:-.} -name __openerp__.py -o -name __manifest__.py -exec dirname {} \;
+}
+
 doh_check_stage0_depends() {
     if ! (which sudo >/dev/null 2>&1); then
         echo "please install sudo before continuing";
@@ -899,6 +905,9 @@ doh_profile_load() {
         fi
         edebug "loading local profile file: ${profile}"
     else
+        if [ x"${DOH_PROFILE_MANDATORY:-1}" = x"0" ]; then
+            return
+        fi
         die "unable to load profile: ${profile}"
     fi
     OLDIFS="${IFS}"
@@ -1600,6 +1609,10 @@ Development commands:
   scaffold      create a new module based on a template
   shell         get an odoo shell prompt
 
+Tools commands
+
+  count-lines   count single lines of code (cloc)
+
 Service commands
 
   start         start odoo service
@@ -2166,6 +2179,143 @@ HELP_CMD_RESTORE_DB
     erun --show ${restore_db} -Ox -j2 -d "${db_name}" "${db_restore_file}"
 }
 
+doh_count_lines_of() {
+    # $1: dir path
+    rm -f /tmp/counts.xml
+    cloc --xml --progress-rate=0 --quiet  --by-file-by-lang \
+    --force-lang=xml,rml --force-lang=xml,mako \
+    --exclude-dir=doc,static/lib,scripts,migrations,.git,.hg,.svn \
+    --exclude-ext=sh,java,xsd,dtd --exclude-lang=HTML,Scala --lang-no-ext=Scala "$1" \
+        --report-file /tmp/counts.xml
+    if [ x"${SHOW_RAW_RESULTS}" = x"1" ]; then
+       cat /tmp/counts.xml
+    fi
+    if [ -f /tmp/counts.xml ]; then
+        python -c "import re; from lxml import etree; \
+            n = etree.fromstring(open('/tmp/counts.xml', 'rb').read()); \
+            counts = {'XML': 0, 'Python': 0, 'Javascript': 0, 'Style': 0, 'Other': 0, 'Tests': 0}; \
+            map = {k: k for k in counts}; map.update({'CSS': 'Style', 'SASS': 'Style', 'LESS': 'Style'}); \
+            _=[\
+                counts.__setitem__(\
+                    map.get(re.match('.*(/tests/|/static/test).*', l.get('name')) and 'Tests' or l.get('language'), 'Other'), \
+                    counts[map.get(re.match('.*(/tests/|/static/test).*', l.get('name')) and 'Tests' or l.get('language'), 'Other')].__add__( int(l.get('code')))\
+                ) \
+                for l in n.xpath('//file') \
+            ]; \
+            print('%(Python)d,%(XML)d,%(Javascript)d,%(Style)d,%(Other)d,%(Tests)d' % counts)"
+    else
+        echo "0,0,0,0,0,0"
+    fi
+}
+
+cmd_count_lines() {
+: <<HELP_CMD_COUNT_LINES
+doh count-lines [--by-date DATE] [--branch BRANCH] [PATH]
+
+Count single lines of code.
+
+HELP_CMD_COUNT_LINES
+
+    local mode="by_module"
+    local sow="Mon"  # day to use as reference
+    local sow_name=$(LC_ALL=C date --date="last ${sow}" +'%A')
+    local count_since=$(date --date="last ${sow}" +'%Y-%m-%d')
+    local next_monday=$(date --date="next ${sow}" +'%Y-%m-%d')  # upper limit to stop to
+    local check_dir=""  # TODO: check presence of dirs
+    local branch=""
+    local path=$(readlink -f .)
+
+    # Try loading profile, but don't fail if we can't
+    DOH_PROFILE_MANDATORY="0" \
+        doh_profile_load
+
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --by-date)
+                mode="by_date"
+                if [ x"$2" = x"" ]; then
+                    die "no date provided to --by-date"
+                fi
+                count_since=$(date --date="$2" +'%Y-%m-%d')
+                if [ x$(LC_ALL=C date --date="${count_since}" +%a) != x"${sow}" ]; then
+                    die "The provided date must be a ${sow_name}"
+                fi
+                shift; shift;
+                ;;
+            --branch)
+                if [ x"$2" = x"" ]; then
+                    die "no branch name provided to --branch"
+                fi
+                branch="$2"
+                shift; shift;
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    if [ $# -gt 0 ]; then
+        path=$(readlink -f "$1")
+    fi
+    if ! helper_is_dir_repo "${path}" "git"; then
+        die "directory '${path}' must be a git repository"
+    fi
+    if [ x"${branch}" = x"" ]; then
+        branch=$(git -C "${path}" branch --show-current)
+    fi
+    edebug "will count lines with mode: ${mode}, since: ${count_since}, branch: ${branch}, path: ${path}"
+
+    dpkg_check_packages_installed "cloc"
+
+    # Re-implement this internally
+    if [ x"${mode}" = x"by_date" ]; then
+        local d="${count_since}"
+        echo "Date,Comment,Python,XML,Javascript,Style (CSS/SASS/LESS),Other,Tests,Commit"
+        while [ "$d" != "${next_monday}" ]; do
+            local n=1
+            ok=0
+            while [ $ok -ne 1 ] && [ $n -le 20 ]; do
+                edebug "${branch}"
+                rev_at_date=$(erun --show git -C "${path}" rev-list -n${n} --before="$d" --first-parent ${branch} | tail -n1)
+                if [ x"${rev_at_date}" = x"" ]; then
+                    # no revision found
+                    n=$((n + 1))
+                    continue
+                fi
+                edebug "[${d}] will checkout to rev: ${rev_at_date} (n: $n)" >&2
+                git -C "${path}" checkout --quiet --force "${rev_at_date}" >/dev/null
+                rcode="$?"
+                edebug "rcode: $?" >&2
+                git -C "${path}" clean -fxd >&2 2>&2
+                has_modules="1"
+                # if [ -d ./event_training ] || [ -d ./event_exam ]; then
+                #     has_modules="1"
+                # fi
+                if [ $rcode -eq 0 ] && [ x"${has_modules}" = x"1" ]; then
+                    ok=1
+                fi
+                n=$((n + 1))
+            done
+            if [ $ok -ne 1 ]; then
+                echo "${d},,0,0,0,0,0,0,not_found"
+            else
+                module_count=$(doh_count_lines_of "${path}")
+                echo "${d},,${module_count},${rev_at_date}"
+            fi
+            d=$(date --date="${d} + 7 days" +'%Y-%m-%d')
+        done
+        erun --show git -C "${path}" checkout --quiet --force "${branch}"
+    else
+        counts=""
+        local modules_path=$(doh_list_odoo_modules "${path}")
+        echo "Module,Comment,Python,XML,Javascript,Style (CSS/SASS/LESS),Other,Tests,Commit"
+        for module_path in ${modules_path}; do
+            local module=$(basename "${module_path}")
+            module_count=$(doh_count_lines_of "${module_path}")
+            echo "${module},,${module_count},${branch}"
+        done
+    fi
+}
 
 cmd_client() {
 : <<HELP_CMD_CLIENT
