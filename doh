@@ -428,7 +428,7 @@ helper_is_dir_repo() {
 doh_list_odoo_modules() {
     # $1: addons path
     # output: list of Odoo modules path found
-    find ${1:-.} -name __openerp__.py -o -name __manifest__.py -exec dirname {} \;
+    find ${1:-.} -name __openerp__.py -o -name __manifest__.py | xargs -n1 /usr/bin/dirname
 }
 
 doh_check_stage0_depends() {
@@ -1609,6 +1609,10 @@ Development commands:
   scaffold      create a new module based on a template
   shell         get an odoo shell prompt
 
+I18n commands:
+
+  i18n-export   refresh source + language terms
+
 Tools commands
 
   count-lines   count single lines of code (cloc)
@@ -1755,6 +1759,101 @@ HELP_CMD_SHELL
 
     DOH_DOCKER_NO_PUBLISH=1 \
         doh_run_server -- shell "$@"
+}
+
+cmd_i18n_export() {
+: <<HELP_CMD_I18N_EXPORT
+doh i18n-export [-l fr_FR,de_DE,...] [module1 ...]
+
+Export source + language of specific modules or all modules if none specified.
+
+Language to export should be set with:
+doh config i18n.langs=fr_FR,de_DE,...
+
+HELP_CMD_I18N_EXPORT
+    local conffile=$(doh_profile_find)
+    doh_profile_load "${conffile}"
+
+    local i18n_db="${CONF_PROFILE_NAME}-i18n"
+    local i18n_dir_in_tmp=$(mktemp -d)
+    local i18n_dir_in_ct="/mnt/extra-i18n"
+    local langs=$(echo $CONF_I18N_LANGS | tr ',' '\n')
+    if [ x"$1" = x"-l" ]; then
+        langs=$(echo "$2" | tr ',' '\n')
+        shift; shift;
+    fi
+    if [ -z "${langs}" ]; then
+        elog "No language set, building only source file"
+    fi
+
+    chmod 0733 "${i18n_dir_in_tmp}"
+    export DOH_I18N_TMPDIR="${i18n_dir_in_tmp}"
+    i18n_cleanup_tmp() {
+        rm -Rf "${DOH_I18N_TMPDIR}"
+    }
+    trap i18n_cleanup_tmp EXIT
+
+    local modules=""
+    if [ $# -ge 1 ]; then
+        for mod in "$@"; do
+            if [ -f "${DIR_EXTRA}/${mod}/__manifest__.py" ]; then
+                modules="${modules} ${mod}"
+            fi
+        done
+    else
+        find_modules() {
+            # $1: dir
+            for mpath in $(find "$1" -name __manifest__.py); do
+                mdir=$(dirname "$mpath")
+                echo `basename ${mdir}`
+            done
+        }
+        modules=$(find_modules "${DIR_EXTRA}" | sort)
+    fi
+    if [ -z "${modules}" ]; then
+        die "No module found for translation exports"
+    fi
+
+    # DIR_I18N_SOURCE=$(readlink --canonicalize "${SCRIPTPATH}/source")
+    # DIR_IN_CT="/mnt/extra-i18n"
+
+    local docker_volumes_orig="${DOH_DOCKER_VOLUMES}"
+    for module in ${modules}; do
+        cowsay -f tux "Exporting i18n: ${module}";
+        local module_i18n_dir="${DIR_EXTRA}/${module}/i18n"
+        if [ ! -e "${module_i18n_dir}" ]; then
+            mkdir "${module_i18n_dir}"
+        fi
+
+        cmd_drop_db "${i18n_db}" # doh drop-db ${I18N_DB};
+        # if [ x"${BASE_DB}" != x"" ]; then
+        #     doh copy-db ${BASE_DB} ${I18N_DB};
+        # fi
+        cmd_run -d "${i18n_db}" -i "${module}" --stop-after-init --no-xmlrpc
+        DOH_DOCKER_VOLUMES="${DOH_DOCKER_VOLUMES} -v ${i18n_dir_in_tmp}:${i18n_dir_in_ct}:rw" \
+            cmd_run -d ${i18n_db} --modules="${module}" --without-demo=all --i18n-export="${i18n_dir_in_ct}/${module}.source.po" \
+            --no-xmlrpc --stop-after-init \
+            && cp "${i18n_dir_in_tmp}/${module}.source.po" "${module_i18n_dir}/${module}.pot"
+
+        string_count=$(grep -E '^msgid ' "${module_i18n_dir}/${module}.pot" | wc -l)
+        if [ ${string_count} -le 1 ]; then
+            elog "${module}: No string to translate"
+        fi
+
+        local module_i18n_source="${module_i18n_dir}/${module}.pot"
+        for lang in ${langs}; do
+            module_i18n_target="${module_i18n_dir}/${lang%%_*}.po"
+            echo -n "${module_i18n_target} [${lang}] "
+            if [ -f "${module_i18n_target}" ]; then
+                msgmerge -U --no-fuzzy-match --no-wrap --backup=none "${module_i18n_target}" "${module_i18n_source}"
+            else
+                msginit -l "${lang}" --no-wrap --no-translator -o "${module_i18n_target}" -i "${module_i18n_source}"
+            fi
+        done
+
+        DOH_DOCKER_VOLUMES="${docker_volumes_orig}"
+
+    done
 }
 
 cmd_init() {
