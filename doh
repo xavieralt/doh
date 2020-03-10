@@ -1471,7 +1471,7 @@ doh_run_server_docker() {
 
     if [ x"${DOH_CMD_RUN_USAGE}" = x"launch-instance" ]; then
         # doh run should set container name to 'odoo-${CONF_PROFILE_NAME}'
-        docker_args="${docker_args} --name=odoo-${CONF_PROFILE_NAME}"
+        docker_args="${docker_args} --name=odoo-${DOH_INSTANCE_NAME:-$CONF_PROFILE_NAME}"
     fi
 
     local datavolume_ctpath="/var/lib/odoo"
@@ -2307,13 +2307,13 @@ doh_count_lines_of() {
     fi
 }
 
-cmd_count_lines() {
-: <<HELP_CMD_COUNT_LINES
-doh count-lines [--by-date DATE] [--branch BRANCH] [PATH]
+cmd_cloc() {
+: <<HELP_CMD_CLOC
+doh cloc [[--by-date [--since DATE]] [--branch BRANCH] [PATH]
 
 Count single lines of code.
 
-HELP_CMD_COUNT_LINES
+HELP_CMD_CLOC
 
     local mode="by_module"
     local sow="Mon"  # day to use as reference
@@ -2332,8 +2332,11 @@ HELP_CMD_COUNT_LINES
         case $1 in
             --by-date)
                 mode="by_date"
+                shift;
+                ;;
+            --since)
                 if [ x"$2" = x"" ]; then
-                    die "no date provided to --by-date"
+                    die "no date provided to --since"
                 fi
                 count_since=$(date --date="$2" +'%Y-%m-%d')
                 if [ x$(LC_ALL=C date --date="${count_since}" +%a) != x"${sow}" ]; then
@@ -2370,7 +2373,8 @@ HELP_CMD_COUNT_LINES
     if [ x"${mode}" = x"by_date" ]; then
         local d="${count_since}"
         echo "Date,Comment,Python,XML,Javascript,Style (CSS/SASS/LESS),Other,Tests,Commit"
-        while [ "$d" != "${next_monday}" ]; do
+        while [[ "$d" < "${next_monday}" ||
+                 ( "${d}" == "${next_monday}" && "${count_since}" == "${next_monday}" ) ]]; do
             local n=1
             ok=0
             while [ $ok -ne 1 ] && [ $n -le 20 ]; do
