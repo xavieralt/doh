@@ -2500,6 +2500,7 @@ HELP_CMD_COVERAGE
         shift;
     fi
 
+    local v="${CONF_PROFILE_VERSION:-8.0}"
     local COVERAGE_ARGS=""
     local DB="$1"
     local MODS="$2"
@@ -2527,13 +2528,21 @@ HELP_CMD_COVERAGE
             if [ `docker image ls --format='{{.Repository}}:{{.Tag}}' | grep "${docker_coverage_image}:coverage" | wc -l` -lt 1 ]; then
                 ewarn "Building docker image for coverage: ${docker_coverage_image}:coverage"
             fi
+            if [[ x"${v}" =~ ^x(13.0|12.0|11.0|master)$ ]]; then
+                local docker_coverage_python="python3"
+                local docker_coverage_pip="pip3"
+            else
+                local docker_coverage_python="python"
+                local docker_coverage_pip="pip"
+            fi
+
             docker build -t "${docker_coverage_image}" - 2>/dev/null <<EOF
 FROM ${docker_image}
 USER root
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc python-dev bzip2 \
-    && easy_install coverage \
-    && apt-get purge -y gcc python-dev \
+    && apt-get install -y --no-install-recommends gcc ${docker_coverage_python}-dev ${docker_coverage_python}-pip bzip2 \
+    && ${docker_coverage_pip} install coverage \
+    && apt-get purge -y gcc ${docker_coverage_python}-dev \
     && apt-get autoremove -y
 RUN set -x; \
     curl -sSL -o phantomjs.tar.bz2 https://bitbucket.org/ariya/phantomjs/downloads/phantomjs-2.1.1-linux-x86_64.tar.bz2 \
