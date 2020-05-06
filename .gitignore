@@ -1,0 +1,3 @@
+.git
+*.py[oc]
+__pycache__/*
