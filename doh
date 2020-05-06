@@ -1471,7 +1471,7 @@ doh_run_server_docker() {
 
     if [ x"${DOH_CMD_RUN_USAGE}" = x"launch-instance" ]; then
         # doh run should set container name to 'odoo-${CONF_PROFILE_NAME}'
-        docker_args="${docker_args} --name=odoo-${DOH_INSTANCE_NAME:-$CONF_PROFILE_NAME}"
+        docker_args="${docker_args} --name=odoo-${DOH_INSTANCE_NAME:-$CONF_PROFILE_NAME}${DOH_INSTANCE_SUFFIX:-}"
     fi
 
     local datavolume_ctpath="/var/lib/odoo"
@@ -1817,6 +1817,7 @@ HELP_CMD_I18N_EXPORT
     # DIR_I18N_SOURCE=$(readlink --canonicalize "${SCRIPTPATH}/source")
     # DIR_IN_CT="/mnt/extra-i18n"
 
+    export DOH_INSTANCE_SUFFIX="-i18n"
     local docker_volumes_orig="${DOH_DOCKER_VOLUMES}"
     for module in ${modules}; do
         cowsay -f tux "Exporting i18n: ${module}";
