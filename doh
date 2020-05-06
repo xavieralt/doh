@@ -428,7 +428,7 @@ helper_is_dir_repo() {
 doh_list_odoo_modules() {
     # $1: addons path
     # output: list of Odoo modules path found
-    find ${1:-.} -name __openerp__.py -o -name __manifest__.py | xargs -n1 /usr/bin/dirname
+    find ${1:-.} -name __openerp__.py -o -name __manifest__.py -exec /usr/bin/dirname {} \;
 }
 
 doh_check_stage0_depends() {
@@ -2287,7 +2287,7 @@ doh_count_lines_of() {
     --exclude-ext=sh,java,xsd,dtd --exclude-lang=HTML,Scala --lang-no-ext=Scala "$1" \
         --report-file /tmp/counts.xml
     if [ x"${SHOW_RAW_RESULTS}" = x"1" ]; then
-       cat /tmp/counts.xml
+       cat /tmp/counts.xml >&2
     fi
     if [ -f /tmp/counts.xml ]; then
         python -c "import re; from lxml import etree; \
@@ -2309,9 +2309,29 @@ doh_count_lines_of() {
 
 cmd_cloc() {
 : <<HELP_CMD_CLOC
-doh cloc [[--by-date [--since DATE]] [--branch BRANCH] [PATH]
+doh cloc [[--by-date [--since DATE]] [--branch BRANCH] [-c] [PATH]
 
 Count single lines of code.
+
+There is two modes:
+- by path (default):
+
+   Will compute the counts per modules, if the supplied PATH contains any
+   modules, or raw count for the supplied PATH
+
+- by date:
+
+   Will compute the global counts for the supplied PATH, looping from the
+   supplied DATE (or Monday of the current week) up to today
+
+
+Options:
+
+--by-date   Change the module to compute count per week (on each Monday)
+
+--since     Set the start of the computation date (only for --by-date mode)
+
+-c          Add subtotal to each lines
 
 HELP_CMD_CLOC
 
@@ -2320,13 +2340,17 @@ HELP_CMD_CLOC
     local sow_name=$(LC_ALL=C date --date="last ${sow}" +'%A')
     local count_since=$(date --date="last ${sow}" +'%Y-%m-%d')
     local next_monday=$(date --date="next ${sow}" +'%Y-%m-%d')  # upper limit to stop to
+    local subtotal="0"
     local check_dir=""  # TODO: check presence of dirs
     local branch=""
     local path=$(readlink -f .)
+    local repo_path="${path}"
+    local orig_path="${PWD}"
 
     # Try loading profile, but don't fail if we can't
     DOH_PROFILE_MANDATORY="0" \
         doh_profile_load
+    cd "${orig_path}"
 
     while [ $# -gt 0 ]; do
         case $1 in
@@ -2351,6 +2375,10 @@ HELP_CMD_CLOC
                 branch="$2"
                 shift; shift;
                 ;;
+            -c)
+                subtotal="1";
+                shift;
+                ;;
             *)
                 break
                 ;;
@@ -2358,38 +2386,50 @@ HELP_CMD_CLOC
     done
     if [ $# -gt 0 ]; then
         path=$(readlink -f "$1")
+        repo_path="${path}"
     fi
-    if ! helper_is_dir_repo "${path}" "git"; then
-        die "directory '${path}' must be a git repository"
+    if [ -z "${repo_path}" ]; then
+        die "unable to find path: ${repo_path}"
+    fi
+    while ! helper_is_dir_repo "${repo_path}" "git" && [ x"${repo_path}" != x"/" ]; do
+        repo_path=$(dirname "${repo_path}")
+    done
+    if ! helper_is_dir_repo "${repo_path}" "git"; then
+        die "directory '${path}' must be under a git repository"
     fi
     if [ x"${branch}" = x"" ]; then
-        branch=$(git -C "${path}" branch --show-current)
+        branch=$(git -C "${repo_path}" branch --show-current)
     fi
-    edebug "will count lines with mode: ${mode}, since: ${count_since}, branch: ${branch}, path: ${path}"
+    edebug "will count lines with mode: ${mode}, since: ${count_since}, branch: ${branch}, repo path: ${repo_path}, path: ${path}"
 
     dpkg_check_packages_installed "cloc"
 
+    local subtotal_str=""
+    local subtotal_placeholder=","
+    if [ x"${subtotal}" = x"1" ]; then
+        subtotal_str=",Subtotal"
+    fi
     # Re-implement this internally
     if [ x"${mode}" = x"by_date" ]; then
         local d="${count_since}"
-        echo "Date,Comment,Python,XML,Javascript,Style (CSS/SASS/LESS),Other,Tests,Commit"
+        echo "Date,Comment,Python,XML,Javascript,Style (CSS/SASS/LESS),Other,Tests${subtotal_str},Commit"
         while [[ "$d" < "${next_monday}" ||
                  ( "${d}" == "${next_monday}" && "${count_since}" == "${next_monday}" ) ]]; do
             local n=1
             ok=0
             while [ $ok -ne 1 ] && [ $n -le 20 ]; do
                 edebug "${branch}"
-                rev_at_date=$(erun --show git -C "${path}" rev-list -n${n} --before="$d" --first-parent ${branch} | tail -n1)
+                rev_at_date=$(erun --show git -C "${repo_path}" rev-list -n${n} --before="$d" --first-parent ${branch} | tail -n1)
                 if [ x"${rev_at_date}" = x"" ]; then
                     # no revision found
                     n=$((n + 1))
                     continue
                 fi
                 edebug "[${d}] will checkout to rev: ${rev_at_date} (n: $n)" >&2
-                git -C "${path}" checkout --quiet --force "${rev_at_date}" >/dev/null
+                git -C "${repo_path}" checkout --quiet --force "${rev_at_date}" >/dev/null
                 rcode="$?"
                 edebug "rcode: $?" >&2
-                git -C "${path}" clean -fxd >&2 2>&2
+                git -C "${repo_path}" clean -fxd >&2 2>&2
                 has_modules="1"
                 # if [ -d ./event_training ] || [ -d ./event_exam ]; then
                 #     has_modules="1"
@@ -2400,23 +2440,37 @@ HELP_CMD_CLOC
                 n=$((n + 1))
             done
             if [ $ok -ne 1 ]; then
-                echo "${d},,0,0,0,0,0,0,not_found"
+                echo "${d},,0,0,0,0,0,0${subtotal_placeholder},not_found"
             else
-                module_count=$(doh_count_lines_of "${path}")
-                echo "${d},,${module_count},${rev_at_date}"
+                module_count=$(doh_count_lines_of "${repo_path}")
+                echo "${d},,${module_count}${subtotal_placeholder},${rev_at_date}"
             fi
             d=$(date --date="${d} + 7 days" +'%Y-%m-%d')
         done
         erun --show git -C "${path}" checkout --quiet --force "${branch}"
     else
         counts=""
-        local modules_path=$(doh_list_odoo_modules "${path}")
-        echo "Module,Comment,Python,XML,Javascript,Style (CSS/SASS/LESS),Other,Tests,Commit"
-        for module_path in ${modules_path}; do
-            local module=$(basename "${module_path}")
-            module_count=$(doh_count_lines_of "${module_path}")
-            echo "${module},,${module_count},${branch}"
-        done
+        local modules_path=$(doh_list_odoo_modules "${path}" | sort -t/ -k 1)
+        echo "Module,Comment,Python,XML,Javascript,Style (CSS/SASS/LESS),Other,Tests${subtotal_str},Commit"
+        if [ x"${modules_path}" = x"" ]; then
+            # computing for raw path if path does not contains any modules
+            path_count=$(doh_count_lines_of "${path}")
+            path_subtotal=""
+            if [ x"${subtotal}" = x"1" ]; then
+                path_subtotal=",$(( `echo ${path_count} | tr ',' '+'` ))"
+            fi
+            echo "${path},,${path_count}${path_subtotal},${branch}"
+        else
+            for module_path in ${modules_path}; do
+                local module_subtotal=""
+                local module=$(basename "${module_path}")
+                module_count=$(doh_count_lines_of "${module_path}")
+                if [ x"${subtotal}" = x"1" ]; then
+                    module_subtotal=",$(( `echo ${module_count} | tr ',' '+'` ))"
+                fi
+                echo "${module},,${module_count}${module_subtotal},${branch}"
+            done
+        fi
     fi
 }
 
