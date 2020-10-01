@@ -1006,7 +1006,7 @@ doh_profile_load() {
     fi
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
-    if [[ x"${v}" =~ ^x(13.0|12.0|11.0|10.0|master)$ ]]; then
+    if [[ x"${v}" =~ ^x(14.0|13.0|13.3|12.0|11.0|10.0|master)$ ]]; then
         export CONF_SERVER_RCFILE="odoo.conf"
         export CONF_SERVER_CMD="odoo"
         export CONF_SERVER_CMDDEV="odoo-bin"
@@ -1351,7 +1351,7 @@ doh_run_server() {
 	start="sudo -u ${CONF_PROFILE_RUNAS}"
     fi
 
-    if [[ x"${v}" =~ ^x(13.0|12.0|11.0|10.0|9.0|8.0|7.0|master)$ ]]; then
+    if [[ x"${v}" =~ ^x(14.0|13.0|13.3|12.0|11.0|10.0|9.0|8.0|7.0|master)$ ]]; then
         edebug "Starting server using: ${start} ${DIR_MAIN}/${CONF_SERVER_CMDDEV} -c ${DIR_CONF}/odoo-server.conf $@"
         ${start} "${DIR_MAIN}/${CONF_SERVER_CMDDEV}" -c "${DIR_CONF}/odoo-server.conf" "$@"
     elif [[ x"${v}" =~ ^x(6.1|6.0)$ ]]; then
@@ -1395,7 +1395,7 @@ doh_run_server_docker() {
     fi
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
-    if ! [[ x"${v}" =~  ^x(13.0|12.0|11.0|10.0|9.0|8.0|7.0|master) ]]; then
+    if ! [[ x"${v}" =~  ^x(14.0|13.0|13.3|12.0|11.0|10.0|9.0|8.0|7.0|master) ]]; then
         die "Docker runtime only supportted work for odoo 8.0 and later"
     fi
 
@@ -1493,7 +1493,7 @@ doh_run_server_docker() {
     fi
 
     local distpkg_path="/usr/lib/python2.7/dist-packages"
-    if [[ x"${v}" =~  ^x(13.0|12.0|11.0|master) ]]; then
+    if [[ x"${v}" =~  ^x(14.0|13.0|13.3|12.0|11.0|master) ]]; then
         distpkg_path="/usr/lib/python3/dist-packages"
     fi
 
@@ -2529,7 +2529,7 @@ HELP_CMD_COVERAGE
             if [ `docker image ls --format='{{.Repository}}:{{.Tag}}' | grep "${docker_coverage_image}:coverage" | wc -l` -lt 1 ]; then
                 ewarn "Building docker image for coverage: ${docker_coverage_image}:coverage"
             fi
-            if [[ x"${v}" =~ ^x(13.0|12.0|11.0|master)$ ]]; then
+            if [[ x"${v}" =~ ^x(14.0|13.0|13.3|12.0|11.0|master)$ ]]; then
                 local docker_coverage_python="python3"
                 local docker_coverage_pip="pip3"
             else
@@ -2592,7 +2592,7 @@ EOF
     local COVERAGE_FILE="${DIR_ROOT}/coverage/run.coverage"
 
     local v="${CONF_PROFILE_VERSION:-8.0}"
-    if [[ x"${v}" =~ ^x(13.0|12.0|11.0|10.0|9.0|8.0|7.0|master)$ ]]; then
+    if [[ x"${v}" =~ ^x(14.0|13.0|13.3|12.0|11.0|10.0|9.0|8.0|7.0|master)$ ]]; then
         edebug "Coverage server using: ${start} ${DIR_MAIN}/${CONF_SERVER_CMDDEV} -c ${DIR_CONF}/odoo-server.conf $@"
         if [ x"${DOH_LOGFILE}" != x"" ]; then
             if [ x"${run_in_foreground}" = x"1" ]; then
